@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.svelte-kit/
+build/
+
+# Derivation inputs and intermediates — large, reproducible, never committed
+data/
+*.pbf
+*.tif
+*.tiff
+*.laz
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+*.sw?
+
+# Claude Code workspace (local, per-developer)
+.claude/

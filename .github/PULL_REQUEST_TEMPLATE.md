@@ -11,8 +11,8 @@ it a year from now.
 
 | Check | Result |
 | --- | --- |
+| `make check` | |
 | `node scripts/check-pr-title.mjs "<this title>"` | |
-| `check` | gates nothing yet — see #3 |
 
 ## Follow-ups
 

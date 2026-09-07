@@ -17,8 +17,9 @@ jobs:
       # dependencies and takes seconds. The version floor comes from
       # derive/pyproject.toml so CI and a local shell cannot disagree about it,
       # and uv fetches the CPython named in derive/.python-version itself, so
-      # there is no setup-python here.
-      - uses: astral-sh/setup-uv@v10
+      # there is no setup-python here. The action is pinned to an exact patch
+      # because it publishes no floating major tag.
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           version-file: derive/pyproject.toml
           enable-cache: false

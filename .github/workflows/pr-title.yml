@@ -1,0 +1,24 @@
+# Merges into main are squash-only and GitHub takes the squashed subject from
+# the pull request title, so the title *is* the commit message on main. It is
+# checked on every edit, not only on open, because retitling is how it usually
+# goes wrong.
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Via the environment, never the shell: a pull request title is text a
+      # stranger wrote.
+      - env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-pr-title.mjs

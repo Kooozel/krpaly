@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # derive/, db/ and web/ do not exist yet, so there is nothing to lint or
+      # test. The context has to exist and be capable of going green before the
+      # ruleset can require it — a required check that never reports blocks
+      # every pull request forever, with no error that says so. #3 gives this a
+      # body: one job, per-area steps, each no-opping against an absent area.
+      - run: echo "no areas to check yet — see #3"

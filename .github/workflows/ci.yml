@@ -17,4 +17,6 @@ jobs:
       # ruleset can require it — a required check that never reports blocks
       # every pull request forever, with no error that says so. #3 gives this a
       # body: one job, per-area steps, each no-opping against an absent area.
-      - run: echo "no areas to check yet — see #3"
+      # Single-quoted: an unquoted ` #3` would start a YAML comment and cut
+      # the command off mid-string.
+      - run: 'echo "no areas to check yet — see #3"'

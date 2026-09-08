@@ -76,15 +76,67 @@ description**, so both end up in `git log` verbatim. Write the description as
 the thing you would want to read a year later when a climb comes out one metre
 shorter than it used to: what moved, what was verified, and how.
 
-Run the gate before pushing. Right now that is one command, because `derive/`,
-`db/` and `web/` do not exist yet:
+Run the gate before pushing — CI runs exactly this:
 
 ```sh
+make check
 node scripts/check-pr-title.mjs "<your pull request title>"
 ```
 
-CI runs that as the `pr-title` job. The other required context, `check`, is
-deliberately empty — it exists so the ruleset has something to require, and it
-reports green without testing anything. #3 gives it a body: the Python
-toolchain, `make check`, and a step per area that no-ops while that area is
-absent. When that lands, this block grows to match it.
+The second is the `pr-title` job; the first is the `check` job, which runs this
+repo's `Makefile` rather than a copy of its steps, so the two cannot drift.
+
+`make check` needs `uv` on your `PATH` and nothing else — it fetches the Python
+in `derive/.python-version` and the tools in `derive/uv.lock` itself:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+krpaly is three languages that arrive at different times, so `check` is **one
+job with one step per area**, and each area no-ops until it has files in it.
+One required context, one gate per area: a pull request is never blocked on a
+language it did not touch, and splitting it into three required contexts would
+be worse — a context that never reports blocks every pull request forever, with
+no error that says so. The areas run in order and the first failure stops the
+rest, so a red gate reports one area at a time rather than all three.
+
+The switch is *files*, not directories: `derive/` carries its toolchain config
+today and its steps are still off, and they come on with the first `.py` in it
+without the workflow being touched. `db/` has no linter chosen yet, so its step
+fails loudly the moment there is SQL to lint rather than passing silently over
+it. `web/`'s step waits for a `web/package.json` and is then `npm --prefix web
+ci` followed by `npm --prefix web run check` — a `package.json` committed
+without its `package-lock.json` fails loudly too, because `npm ci` needs the
+lockfile.
+
+Today `make check` reports three skips and nothing else, because `derive/` has
+no `.py` in it yet. With the first one it runs `ruff format --check` and `ruff
+check`, and — once there are tests — `pytest`, all against `derive/`.
+
+**Nothing is type-checked, on purpose.** `derive/` shells out to a Node process
+and reads a raster; the interesting bugs there are geometric, not type errors.
+A checker earns its place when `derive/` grows a module boundary two callers
+share, and that is the thing to look for rather than a line count.
+
+`make format` is the writing half: the same tools and config with `--fix`.
+
+Both run the tools through `uv run --locked`, so changing
+`derive/pyproject.toml` without re-locking fails rather than quietly rewriting
+`derive/uv.lock` under the gate. Re-lock with `uv lock --directory derive` and
+commit the result.
+
+## Test data
+
+The derivation's real inputs are large and reproducible, so `data/`, `*.pbf`,
+`*.tif` and `*.laz` are gitignored and a Geofabrik extract never enters git.
+One exception, and it is what makes the pipeline testable at all: a **small
+committed fixture `.pbf`**, one okres or less, cut alongside the first
+extraction code rather than before it. A test suite with no committed input
+tests nothing.
+
+That fixture is OSM data redistributed in this repo, so **ODbL applies to it**:
+it carries a `README.md` beside it crediting *© OpenStreetMap contributors*
+under ODbL, and naming the extract, its snapshot timestamp and its bounding box
+precisely enough to re-cut. Terrain fixtures, if any are ever committed, credit
+*© ČÚZK* under CC BY 4.0 the same way.

@@ -40,4 +40,5 @@ with everything else that touches the database.
 
 ## Status
 
-Empty. Nothing built yet.
+Governance and the Python toolchain are in place — `make check` is the gate,
+and it grows a step as each of the three areas lands. Nothing is derived yet.

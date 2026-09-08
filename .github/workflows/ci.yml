@@ -12,11 +12,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # derive/, db/ and web/ do not exist yet, so there is nothing to lint or
-      # test. The context has to exist and be capable of going green before the
-      # ruleset can require it — a required check that never reports blocks
-      # every pull request forever, with no error that says so. #3 gives this a
-      # body: one job, per-area steps, each no-opping against an absent area.
-      # Single-quoted: an unquoted ` #3` would start a YAML comment and cut
-      # the command off mid-string.
-      - run: 'echo "no areas to check yet — see #3"'
+      # uv resolves the environment from derive/uv.lock on every run rather
+      # than restoring one that drifts into staleness — it is two dev
+      # dependencies and takes seconds. The version floor comes from
+      # derive/pyproject.toml so CI and a local shell cannot disagree about it,
+      # and uv fetches the CPython named in derive/.python-version itself, so
+      # there is no setup-python here. The action is pinned to an exact patch
+      # because it publishes no floating major tag.
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          version-file: derive/pyproject.toml
+          enable-cache: false
+
+      # One job, one required context, one step per area — and the steps live
+      # in the Makefile, so an area turning on is a change to that file rather
+      # than to this one. setup-node lands with web/, alongside the step that
+      # needs it.
+      - run: make check

@@ -6,14 +6,36 @@ repository.
 ## Commands
 
 ```sh
-node scripts/check-pr-title.mjs "<your pull request title>"   # the whole local gate, today
+make check                                                    # the `check` job, verbatim
+node scripts/check-pr-title.mjs "<your pull request title>"   # the `pr-title` job
+make format                                                   # ruff format + ruff check --fix
 ```
 
-That is not an abbreviation — it is the complete list. `derive/`, `db/` and `web/` do not exist
-yet, so there is nothing to lint, typecheck or test. #3 adds the Python toolchain (`uv`, `ruff`,
-`pytest`) and a `make check` entry point that CI and a local shell run identically; until it lands,
-the `check` context reports green without testing anything, and it exists only so the ruleset on
-`main` has a context to require.
+CI runs the `Makefile` itself rather than a copy of its steps, so the two cannot drift. It needs
+`uv` on `PATH` and nothing else — it fetches the Python in `derive/.python-version` (3.13) and the
+tools in `derive/uv.lock` itself. Every `uv run` passes `--locked`, so a `uv.lock` that has fallen
+behind `pyproject.toml` fails the gate instead of being rewritten under it.
+
+`check` is **one job with one step per area**, because the three areas arrive at different times:
+one required context, one gate per area, and no pull request blocked on a language it did not
+touch. The areas run in order and the first failure stops the rest. `CONTRIBUTING.md` carries the
+reasoning; what binds an edit to the `Makefile` is that each area is switched on by *files* rather
+than by its directory —
+
+```sh
+git ls-files --cached --others --exclude-standard 'derive/*.py'
+```
+
+— where `--others` is the half that makes a new, still-untracked `.py` turn its area on. `derive/`
+therefore carries `pyproject.toml`, `.python-version` and `uv.lock` today with its steps off, and
+they come on with the first `.py` without the workflow being touched.
+
+`pytest` is gated on test files separately from `ruff`, because pytest exits 5 when it collects
+nothing.
+
+**Nothing is type-checked, deliberately** — `derive/` shells out to Node and reads a raster, so its
+interesting bugs are geometric rather than type errors. A checker earns its place when `derive/`
+grows a module boundary two callers share.
 
 ## What this is
 

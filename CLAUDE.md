@@ -114,3 +114,20 @@ Heart-rate zones and anything else personal are never committed.
   squashed and are yours.
 - Close issues from the description (`Closes #12`), not from a commit trailer — the squashed body is
   the description anyway, and the link then survives a retitle.
+
+## Agent skills
+
+Configuration the [engineering skills](https://github.com/mattpocock/skills) read before they act.
+
+### Issue tracker
+
+GitHub Issues on `Kooozel/krpaly`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` and `docs/adr/` at the root, both created lazily by
+`/domain-modeling` rather than upfront. See `docs/agents/domain.md`.

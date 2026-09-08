@@ -13,16 +13,22 @@ make format                                                   # ruff format + ru
 
 CI runs the `Makefile` itself rather than a copy of its steps, so the two cannot drift. It needs
 `uv` on `PATH` and nothing else — it fetches the Python in `derive/.python-version` (3.13) and the
-tools in `derive/uv.lock` itself.
+tools in `derive/uv.lock` itself. Every `uv run` passes `--locked`, so a `uv.lock` that has fallen
+behind `pyproject.toml` fails the gate instead of being rewritten under it.
 
 `check` is **one job with one step per area**, because the three areas arrive at different times:
-one required context, three independent gates, and no pull request blocked on a language it did
-not touch. Each area no-ops until it has files in it, and the switch is *files* rather than
-directories (`git ls-files 'derive/*.py'`) — `derive/` carries `pyproject.toml`, `.python-version`
-and `uv.lock` today with its steps still off, and they come on with the first `.py` without the
-workflow being touched. `db/` has no linter chosen, so its step fails loudly once there is SQL
-rather than passing over it silently; `web/`'s step is `npm --prefix web run check` and waits for a
-`web/package.json`.
+one required context, one gate per area, and no pull request blocked on a language it did not
+touch. The areas run in order and the first failure stops the rest. `CONTRIBUTING.md` carries the
+reasoning; what binds an edit to the `Makefile` is that each area is switched on by *files* rather
+than by its directory —
+
+```sh
+git ls-files --cached --others --exclude-standard 'derive/*.py'
+```
+
+— where `--others` is the half that makes a new, still-untracked `.py` turn its area on. `derive/`
+therefore carries `pyproject.toml`, `.python-version` and `uv.lock` today with its steps off, and
+they come on with the first `.py` without the workflow being touched.
 
 `pytest` is gated on test files separately from `ruff`, because pytest exits 5 when it collects
 nothing.

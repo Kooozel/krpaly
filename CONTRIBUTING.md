@@ -95,25 +95,36 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 krpaly is three languages that arrive at different times, so `check` is **one
 job with one step per area**, and each area no-ops until it has files in it.
-One required context, three independent gates: a pull request is never blocked
-on a language it did not touch, and splitting it into three required contexts
-would be worse — a context that never reports blocks every pull request
-forever, with no error that says so.
+One required context, one gate per area: a pull request is never blocked on a
+language it did not touch, and splitting it into three required contexts would
+be worse — a context that never reports blocks every pull request forever, with
+no error that says so. The areas run in order and the first failure stops the
+rest, so a red gate reports one area at a time rather than all three.
 
 The switch is *files*, not directories: `derive/` carries its toolchain config
 today and its steps are still off, and they come on with the first `.py` in it
 without the workflow being touched. `db/` has no linter chosen yet, so its step
 fails loudly the moment there is SQL to lint rather than passing silently over
-it.
+it. `web/`'s step waits for a `web/package.json` and is then `npm --prefix web
+ci` followed by `npm --prefix web run check` — a `package.json` committed
+without its `package-lock.json` fails loudly too, because `npm ci` needs the
+lockfile.
 
-Today `make check` runs `ruff format --check`, `ruff check` and — once there
-are tests — `pytest`, all against `derive/`. **Nothing is type-checked, on
-purpose.** `derive/` shells out to a Node process and reads a raster; the
-interesting bugs there are geometric, not type errors. A checker earns its
-place when `derive/` grows a module boundary two callers share, and that is the
-thing to look for rather than a line count.
+Today `make check` reports three skips and nothing else, because `derive/` has
+no `.py` in it yet. With the first one it runs `ruff format --check` and `ruff
+check`, and — once there are tests — `pytest`, all against `derive/`.
+
+**Nothing is type-checked, on purpose.** `derive/` shells out to a Node process
+and reads a raster; the interesting bugs there are geometric, not type errors.
+A checker earns its place when `derive/` grows a module boundary two callers
+share, and that is the thing to look for rather than a line count.
 
 `make format` is the writing half: the same tools and config with `--fix`.
+
+Both run the tools through `uv run --locked`, so changing
+`derive/pyproject.toml` without re-locking fails rather than quietly rewriting
+`derive/uv.lock` under the gate. Re-lock with `uv lock --directory derive` and
+commit the result.
 
 ## Test data
 

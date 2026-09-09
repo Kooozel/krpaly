@@ -9,11 +9,37 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+
+    # The one place `make check` stops being satisfiable with only `uv` on
+    # PATH — deliberately, and only here. derive/'s schema tests need a real
+    # PostGIS: every property worth asserting (a check constraint, a unique
+    # over an array, a GiST distance query) is the database's behaviour rather
+    # than ours, and mocking it would test the mock. Locally those tests skip
+    # on an unset DATABASE_URL and the SQL lint still runs; CI sets it, so CI
+    # never skips. Still one job and one required context.
+    services:
+      postgres:
+        # Pinned to a patch line for the same reason climb-engine is pinned:
+        # the database's behaviour is part of what the tests assert.
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
     steps:
       - uses: actions/checkout@v4
 
       # uv resolves the environment from derive/uv.lock on every run rather
-      # than restoring one that drifts into staleness — it is two dev
+      # than restoring one that drifts into staleness — it is a handful of
       # dependencies and takes seconds. The version floor comes from
       # derive/pyproject.toml so CI and a local shell cannot disagree about it,
       # and uv fetches the CPython named in derive/.python-version itself, so

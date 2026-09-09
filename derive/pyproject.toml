@@ -6,10 +6,16 @@ name = "krpaly-derive"
 version = "0.0.0"
 description = "Offline derivation: OSM .pbf → DMR5G sampling → climb-engine → Postgres"
 requires-python = ">=3.13"
-dependencies = []
+# psycopg is the only runtime dependency the schema work needs: the
+# migration runner, and #11's bulk load after it. [binary] so a
+# contributor needs no libpq and no compiler.
+dependencies = ["psycopg[binary]>=3.2"]
 
 [dependency-groups]
-dev = ["ruff>=0.14", "pytest>=8.4"]
+# sqlfluff lints db/, not derive/, which is slightly odd — but derive/ is
+# the repo's only Python toolchain, and a second lockfile for one linter
+# is worse than one misfiled dependency.
+dev = ["ruff>=0.14", "pytest>=8.4", "sqlfluff>=3.4"]
 
 # One version floor that a local shell and CI both read — the `check` job
 # points setup-uv at this file rather than naming a version of its own.
@@ -28,6 +34,10 @@ target-version = "py313"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
 
+# pythonpath because there is no [build-system]: nothing installs the
+# package, and pytest puts derive/tests on sys.path rather than derive,
+# so `import krpaly_derive` needs the rootdir added explicitly.
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"

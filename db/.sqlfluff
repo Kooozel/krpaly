@@ -1,0 +1,19 @@
+# Found by sqlfluff searching upward from each linted file. It sits in db/
+# rather than the repo root because it describes this directory's SQL and
+# nothing else.
+[sqlfluff]
+dialect = postgres
+max_line_length = 100
+
+# The templater is deliberately *not* set here. These are plain .sql files and
+# want `raw` rather than the default jinja, but sqlfluff refuses to take
+# `templater` from a .sqlfluff below the working directory — so the Makefile
+# passes `--templater raw` on the command line instead. Setting it here would
+# be silently ignored with a warning per file.
+
+# `name` is a non-reserved keyword in Postgres (it is a system type name), so
+# region.name and climb.name need no quoting and read better than any synonym.
+# Listed explicitly rather than switching the rule off, so the next keyword
+# used as a column is still a line of review.
+[sqlfluff:rules:references.keywords]
+ignore_words = name

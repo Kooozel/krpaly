@@ -103,16 +103,25 @@ rest, so a red gate reports one area at a time rather than all three.
 
 The switch is *files*, not directories: `derive/` carries its toolchain config
 today and its steps are still off, and they come on with the first `.py` in it
-without the workflow being touched. `db/` has no linter chosen yet, so its step
-fails loudly the moment there is SQL to lint rather than passing silently over
-it. `web/`'s step waits for a `web/package.json` and is then `npm --prefix web
+without the workflow being touched. `db/`'s step is `sqlfluff lint` over the
+migrations, run out of `derive/`'s locked environment because that is the
+repo's only Python toolchain. `web/`'s step waits for a `web/package.json` and
+is then `npm --prefix web
 ci` followed by `npm --prefix web run check` — a `package.json` committed
 without its `package-lock.json` fails loudly too, because `npm ci` needs the
 lockfile.
 
-Today `make check` reports three skips and nothing else, because `derive/` has
-no `.py` in it yet. With the first one it runs `ruff format --check` and `ruff
-check`, and — once there are tests — `pytest`, all against `derive/`.
+Today `make check` runs `ruff format --check`, `ruff check` and `pytest`
+against `derive/`, then `sqlfluff lint` against `db/`, and skips `web/`.
+
+`db/`'s tests are the one place `make check` needs more than `uv` on your
+`PATH`: the schema tests want a real PostGIS, because every property worth
+asserting there (a check constraint, a unique over an array, a GiST distance
+query) is the database's behaviour rather than ours. They skip on an unset
+`DATABASE_URL`, so a contributor without Postgres still gets the rest of the
+gate; CI runs them against a service container and never skips.
+[`db/README.md`](db/README.md) has a `docker run` recipe if you want them
+locally.
 
 **Nothing is type-checked, on purpose.** `derive/` shells out to a Node process
 and reads a raster; the interesting bugs there are geometric, not type errors.

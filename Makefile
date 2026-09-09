@@ -45,14 +45,16 @@ else
 endif
 endif
 
-# No linter chosen yet, so this fails the moment there is SQL to lint rather
-# than passing silently over it — a placeholder that stays quiet after its
-# area lands is a gate that checks nothing.
+# sqlfluff, out of derive/'s locked environment: derive/ is the repo's only
+# Python toolchain, and a second lockfile for one linter is worse than one
+# misfiled dependency. The rest of the config is db/.sqlfluff, which sqlfluff
+# finds by itself — all but the templater, which it refuses to read from a
+# .sqlfluff below the working directory, so it is named here.
 check-db:
 ifeq ($(SQL),)
 	@echo "db/: no SQL yet — skipped"
 else
-	@echo "db/: SQL is present and unchecked — wire a linter in here"; exit 1
+	uv run --locked --directory derive sqlfluff lint --templater raw ../db
 endif
 
 check-web:
@@ -67,12 +69,17 @@ else
 	npm --prefix web run check
 endif
 
-# The writing half of check-derive: same tools, same config, --fix instead of
-# a report.
+# The writing half of check-derive and check-db: same tools, same config,
+# --fix instead of a report.
 format:
 ifeq ($(PY),)
 	@echo "derive/: no Python yet — nothing to format"
 else
 	uv run --locked --directory derive ruff format .
 	uv run --locked --directory derive ruff check --fix .
+endif
+ifeq ($(SQL),)
+	@echo "db/: no SQL yet — nothing to format"
+else
+	uv run --locked --directory derive sqlfluff fix --templater raw ../db
 endif

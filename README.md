@@ -17,10 +17,11 @@ with everything else that touches the database.
 
 ## Settled constraints
 
-- **Terrain: CC BY 4.0.** ČÚZK publishes DMR5G as open data — attribution only,
-  no share-alike, no non-commercial clause. Credit *© ČÚZK* on the site, in API
-  responses, and in any bulk export. The published raster is **2 m**; the quoted
-  0.18 m accuracy belongs to the source point cloud.
+- **Terrain: CC BY 4.0.** ČÚZK publishes DMR 5G as open data — attribution
+  only, no share-alike, no non-commercial clause. It is point data in a TIN, not
+  a raster, and the accuracy that matters here is **0,3 m under forest**.
+  `derive/INPUTS.md` pins the source and the route to it; `ATTRIBUTION.md`
+  carries the credit strings.
 - **ODbL likely applies to the table.** A database derived from OSM geometry is
   probably a Derivative Database. Rendered pages and profiles are Produced Works
   and can be licensed freely. The CC BY terrain layer mixes in cleanly — OSM is
@@ -41,4 +42,5 @@ with everything else that touches the database.
 ## Status
 
 Governance and the Python toolchain are in place — `make check` is the gate,
-and it grows a step as each of the three areas lands. Nothing is derived yet.
+and it grows a step as each of the three areas lands. The derivation's inputs
+are pinned in `derive/INPUTS.md`. Nothing is derived yet.

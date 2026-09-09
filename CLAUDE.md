@@ -55,10 +55,11 @@ web/      SvelteKit — SSR pages, the resolution API, the static regional ancho
 Derivation lives here rather than in its own repo because it shares the schema with everything else
 that touches the database.
 
-**The repo is currently `.gitignore`, `LICENSE`, `README.md`, `CONTRIBUTING.md`, `scripts/` and
-`.github/`.** Everything below about `derive/`, `db/` and `web/` is settled intent, not present
-code — it is written down because these are decisions that are expensive to reverse once rows
-exist, not because the code is there to read.
+**Present: `.gitignore`, `LICENSE`, `README.md`, `CONTRIBUTING.md`, `ATTRIBUTION.md`, `Makefile`,
+`scripts/`, `docs/agents/`, `.github/` — and `derive/`, which has its toolchain, its `make check`
+step and `INPUTS.md`, but not a line of pipeline code.** Everything below about `db/` and `web/` is
+settled intent, not present code — it is written down because these are decisions that are
+expensive to reverse once rows exist, not because the code is there to read.
 
 ## Constraints that bind work before it is written
 
@@ -90,10 +91,14 @@ These are the ones where doing it wrong means re-deriving rather than patching.
 
 ## Licensing, settled
 
-- **Terrain: CC BY 4.0.** ČÚZK publishes DMR5G as open data — attribution only, no share-alike, no
-  non-commercial clause. Credit *© ČÚZK* on the site, in API responses, and in any bulk export. The
-  published raster is **2 m**; the quoted 0.18 m accuracy belongs to the source point cloud, and
-  DMR5G is not DMR4G.
+- **Terrain: CC BY 4.0.** ČÚZK publishes DMR 5G as open data — attribution only, no share-alike, no
+  non-commercial clause. Credit *© ČÚZK* on the site, in API responses, and in any bulk export;
+  `ATTRIBUTION.md` carries the exact strings. DMR 5G publishes **no raster**: it ships as LAZ point
+  data in a TIN, and the 2 m figure is the cell size of ČÚZK's ImageServer mosaic, a service
+  derived from it. The point cloud *is* the product, so 0,18 m is delivered accuracy — in open
+  terrain. The number that matters for Czech climbs is the other one, **0,3 m under forest**. And
+  DMR 5G is still not DMR 4G: INSPIRE `EL-GRID` looks like the obvious download and is 4G.
+  `derive/INPUTS.md` pins the product, the route and its limitations.
 - **ODbL probably applies to the table.** A database derived from OSM geometry is likely a
   Derivative Database. Rendered pages and profiles are Produced Works and can be licensed freely.
   The CC BY terrain layer mixes in cleanly — OSM is the sole source of the obligation.

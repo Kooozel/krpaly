@@ -60,11 +60,12 @@ Derivation lives here rather than in its own repo because it shares the schema w
 that touches the database.
 
 **Present: `.gitignore`, `LICENSE`, `README.md`, `CONTRIBUTING.md`, `ATTRIBUTION.md`, `Makefile`,
-`scripts/`, `docs/agents/`, `.github/`; `derive/`, which has its toolchain, `INPUTS.md` and the
-migration runner but not a line of pipeline code; and `db/`, which has the schema, its migrations
-and `db/README.md`.** Everything below about `web/` is settled intent, not present code — it is
-written down because these are decisions that are expensive to reverse once rows exist, not because
-the code is there to read.
+`scripts/`, `docs/agents/`, `.github/`; `derive/`, which has its toolchain, `INPUTS.md`, the
+migration runner and the first pipeline stage — OSM extraction to candidate polylines — but nothing
+after it: no DEM sampling, no engine harness, no loader; and `db/`, which has the schema, its
+migrations and `db/README.md`.** Everything below about `web/` is settled intent, not present
+code — it is written down because these are decisions that are expensive to reverse once rows
+exist, not because the code is there to read.
 
 ## Constraints that bind work before it is written
 

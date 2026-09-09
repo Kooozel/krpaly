@@ -6,10 +6,20 @@ name = "krpaly-derive"
 version = "0.0.0"
 description = "Offline derivation: OSM .pbf → DMR5G sampling → climb-engine → Postgres"
 requires-python = ">=3.13"
-# psycopg is the only runtime dependency the schema work needs: the
-# migration runner, and #11's bulk load after it. [binary] so a
-# contributor needs no libpq and no compiler.
-dependencies = ["psycopg[binary]>=3.2"]
+# psycopg for the migration runner and #11's bulk load — [binary] so a
+# contributor needs no libpq and no compiler. The other four are the
+# extraction stage: osmium reads the .pbf (node-location cache, area
+# assembly, and the SimpleWriter that builds the fixture), shapely holds
+# the buffered boundary and its prepared membership test, pyproj gets it
+# into EPSG:5514 so a 10 km buffer is 10 km, and pyarrow writes the
+# GeoParquet.
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "osmium>=4.3",
+    "shapely>=2.1",
+    "pyproj>=3.8",
+    "pyarrow>=21",
+]
 
 [dependency-groups]
 # sqlfluff lints db/, not derive/, which is slightly odd — but derive/ is

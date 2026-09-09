@@ -20,6 +20,12 @@ data/
 *.tiff
 *.laz
 
+# ...except the extraction fixture, which is a few kilobytes and has to be
+# committed: a test suite with no committed input tests nothing. The blanket
+# rule above excludes files and never a parent directory, so this negation
+# takes effect.
+!derive/tests/fixtures/*.pbf
+
 # Secrets and local config
 .env
 .env.*

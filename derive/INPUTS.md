@@ -8,8 +8,9 @@ for a way that crosses the border.
 Almost every value below was read back from the source rather than copied from a product page, and
 the [Re-verify](#re-verify) block at the end is the set of commands that read them again — all eight
 of them run clean as written. The handful that a machine-readable source does not carry are marked
-where they appear. Values marked **recorded at fetch** are the ones a document cannot hold — they
-need the whole file — and belong to #6 and #7.
+where they appear. A few values a document cannot hold — they need the whole file — and those name
+the run's own manifest instead: #6 writes `candidates.manifest.json`, #7 the DEM manifest beside
+it.
 
 Scope: this names inputs. The `derivation` table is #5, the OSM extraction is #6, the DEM fetcher
 and its manifest are #7.
@@ -25,7 +26,7 @@ and its manifest are #7.
 | `osmosis_replication_sequence_number` | 4897 |
 | `osmosis_replication_base_url` | `https://download.geofabrik.de/europe/czech-republic-updates` |
 | `writingprogram` | `osmium/1.16.0` |
-| sha256 | **recorded by #6 at fetch** |
+| sha256 | recorded per run by #6, in `candidates.manifest.json` → `osm_snapshot.sha256` |
 
 Geofabrik publishes md5, not sha256, so the digest in the `derivation` row is ours: #6 computes the
 sha256 of the bytes it downloaded and records both, the published md5 proving the download was not
@@ -60,7 +61,7 @@ values above were obtained and how a reader checks them.
 | `wikidata` | Q190550 |
 | members | 318 (311 `outer` ways, 6 `subarea`, 1 `admin_centre`) |
 | live version | 267 — `2026-08-03T21:13:18Z`, changeset 186892310, read 2026-09-09 |
-| version in the extract | **recorded by #6 at extraction** |
+| version in the extract | recorded per run by #6, in `candidates.manifest.json` → `boundary.relation_version` |
 
 The last two rows are the load-bearing distinction. An administrative boundary is an editable object
 like any other: the live relation keeps moving, and one of the failure modes this milestone exists
@@ -89,6 +90,34 @@ figure once it has real geometry to measure against.
 `boundary_buffer_m` and `boundary_assignment` are columns rather than constants (see [Provenance
 columns](#provenance-columns-for-5)) so that a later change of policy shows up in the data instead
 of only in git history.
+
+## Cyclable ways
+
+Which ways the extraction rides is the one decision in #6 that moves the headline climb count, so
+it is versioned and recorded rather than left implicit in a filter expression. The predicate is
+`derive/krpaly_derive/cyclable.py`; its name is `cyclable/v1`, and every run writes that name into
+`candidates.manifest.json` → `way_filter.version`.
+
+| | `highway`, and the tags that qualify it |
+| --- | --- |
+| in | `motorway_link` `trunk`/`_link` `primary`/`_link` `secondary`/`_link` `tertiary`/`_link` `unclassified` `residential` `living_street` `road` `cycleway` |
+| in | `track` **only** where `tracktype` is `grade1` or `grade2` |
+| out | `motorway`, and everything not named above — `path` `footway` `steps` `bridleway` `pedestrian` `corridor` `construction` `proposed` `raceway` `busway` `platform` among them |
+| out | `track` with no `tracktype`, or `grade3`–`grade5` |
+| out | `access` in `private`/`no`, and `bicycle=no` |
+| override | `bicycle` in `yes`/`designated`/`permissive` beats an `access` exclusion, but never promotes a `highway` value that is out — a `path` signed for bicycles is still not a road climb |
+
+`motorway` is out and `motorway_link` is in on purpose: the motorway itself is not ridden, but a
+link is often the only cyclable connection between two roads that are.
+
+**Why tracks are mostly out**, recorded because it is re-litigable. krpaly is a road-climb database
+and this milestone's headline number is the climb count, so an untagged forest track — the modal
+`track` in the Beskydy — must not inflate it. `grade1` and `grade2` are the surfaced ones and are
+the whole of what is let in.
+
+Widening any of this is a `cyclable/v2` and a new derivation rather than an edit to an existing
+one, which is exactly the visibility wanted: two derivations that differ only by their predicate
+are two sets of rows, told apart by the manifest.
 
 ## DEM source
 

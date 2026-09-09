@@ -34,7 +34,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -97,9 +97,13 @@ SCHEMA = pa.schema(
     ]
 )
 
-# GeoParquet 1.1. `crs: null` is the specification's own way of saying
-# OGC:CRS84, and it is preferable here to an embedded PROJJSON document,
-# which would make the file's bytes a function of the installed PROJ.
+# GeoParquet 1.1. The `crs` key is **absent**, which is how the specification
+# spells OGC:CRS84: "if the `crs` key does not exist, all coordinates in the
+# geometries MUST use longitude, latitude based on the WGS84 datum". That is
+# not the same as `crs: null`, which declares the CRS unknown — a reader
+# would be right to refuse to reproject such a column. Absence is also what
+# keeps the file's bytes independent of the installed PROJ, which an
+# embedded PROJJSON document would not.
 GEO_METADATA = {
     "version": "1.1.0",
     "primary_column": "geometry",
@@ -107,7 +111,6 @@ GEO_METADATA = {
         "geometry": {
             "encoding": "WKB",
             "geometry_types": ["LineString"],
-            "crs": None,
         }
     },
 }
@@ -128,15 +131,17 @@ class Boundary:
     bounds: tuple[float, float, float, float]
     prepared: PreparedGeometry
 
-    def contains_any(self, min_lon, min_lat, max_lon, max_lat, line) -> bool:
-        """Bbox reject first, then the real test.
+    def intersects(self, line: shapely.LineString) -> bool:
+        """Whether a candidate touches the buffered kraj at all.
 
-        The bbox comparison is a handful of float compares and rejects the
-        overwhelming majority of a country's ways when the target is one
-        kraj; `prepared.intersects` is the expensive one and runs only on
-        what survives.
+        Bbox reject first, then the real test: the bbox comparison is four
+        float compares and throws out the overwhelming majority of a
+        country's ways when the target is one kraj, and
+        `prepared.intersects` — the expensive one — then runs on what
+        survives.
         """
         west, south, east, north = self.bounds
+        min_lon, min_lat, max_lon, max_lat = line.bounds
         if max_lon < west or min_lon > east or max_lat < south or min_lat > north:
             return False
         return self.prepared.intersects(line)
@@ -149,6 +154,10 @@ class Counts:
     Drops are counted by reason rather than summed away: a candidate that
     vanishes for the wrong reason is invisible in a climb count, and the
     numbers here are the only place it would show.
+
+    `segments_outside_buffer` is the field #6's plan called
+    `nodes_out_of_buffer`; it counts segments, as the other two do, and #11
+    reads these names out of the manifest.
     """
 
     ways_seen: int = 0
@@ -159,18 +168,22 @@ class Counts:
     segments_outside_buffer: int = 0
 
     def as_dict(self) -> dict[str, int]:
-        dropped = (
-            self.segments_degenerate + self.segments_missing_location + self.segments_outside_buffer
-        )
+        """The counts block of the manifest: what was counted, plus what follows from it."""
+        counted = asdict(self)
         return {
-            "ways_seen": self.ways_seen,
-            "ways_cyclable": self.ways_cyclable,
-            "segments": self.segments,
+            **counted,
+            # Both directions of every segment, which is what a candidate
+            # count means here — stated rather than left to a reader to
+            # multiply.
             "candidates": 2 * self.segments,
-            "segments_degenerate": self.segments_degenerate,
-            "segments_missing_location": self.segments_missing_location,
-            "segments_outside_buffer": self.segments_outside_buffer,
-            "segments_dropped": dropped,
+            # Summed explicitly rather than by matching on the field names:
+            # a count added later is a new reason to drop only if someone
+            # says so here.
+            "segments_dropped": (
+                self.segments_degenerate
+                + self.segments_missing_location
+                + self.segments_outside_buffer
+            ),
         }
 
 
@@ -222,6 +235,12 @@ def read_boundary(pbf: Path, relation_id: int, buffer_m: float, index: str) -> B
     `type=multipolygon`, so the kraj assembles into an `Area` like any other.
     The id filter is what keeps that affordable — without it the manager
     would assemble every multipolygon in Czechia to find one.
+
+    This pass builds a node index too, which pass 3 does again: an area
+    cannot be assembled without the locations of its ring's nodes. The two
+    are sequential and neither holds the other's index, so the cost is time
+    rather than peak memory — but it is why `--index` is honoured here as
+    well.
     """
     wkb_factory = osmium.geom.WKBFactory()
     version: int | None = None
@@ -299,6 +318,27 @@ def cut_indices(node_ids: list[int], degree: Counter) -> list[int]:
     return [0, *interior, last]
 
 
+def candidate(
+    way_id: int, node_ids: list[int], coords: list[tuple[float, float]], direction: str
+) -> dict:
+    """One row. The reverse direction is this called with both lists reversed.
+
+    Said once rather than twice because the two directions are the same row
+    mirrored, and a field that drifts between them — a start node that stops
+    matching its geometry — is the kind of thing #10 would discover as a
+    duplicate anchor long after the derivation ran.
+    """
+    return {
+        "way_refs": [way_id],
+        "node_ids": node_ids,
+        "start_node_id": node_ids[0],
+        "end_node_id": node_ids[-1],
+        "direction": direction,
+        "geometry": shapely.to_wkb(shapely.LineString(coords)),
+        "n_points": len(node_ids),
+    }
+
+
 def emit_ways(
     pbf: Path,
     cyclable: set[int],
@@ -354,42 +394,13 @@ def emit_ways(
                 continue
 
             coords = [(location.lon, location.lat) for location in locations]
-            line = shapely.LineString(coords)
-            lons = [lon for lon, _ in coords]
-            lats = [lat for _, lat in coords]
-            if not boundary.contains_any(min(lons), min(lats), max(lons), max(lats), line):
+            if not boundary.intersects(shapely.LineString(coords)):
                 counts.segments_outside_buffer += 1
                 continue
 
             counts.segments += 1
-            forward_wkb = shapely.to_wkb(line)
-            reverse_wkb = shapely.to_wkb(shapely.LineString(coords[::-1]))
-            reversed_ids = piece[::-1]
-
-            yield (
-                (way.id, seq, 0),
-                {
-                    "way_refs": [way.id],
-                    "node_ids": piece,
-                    "start_node_id": piece[0],
-                    "end_node_id": piece[-1],
-                    "direction": FORWARD,
-                    "geometry": forward_wkb,
-                    "n_points": len(piece),
-                },
-            )
-            yield (
-                (way.id, seq, 1),
-                {
-                    "way_refs": [way.id],
-                    "node_ids": reversed_ids,
-                    "start_node_id": reversed_ids[0],
-                    "end_node_id": reversed_ids[-1],
-                    "direction": REVERSE,
-                    "geometry": reverse_wkb,
-                    "n_points": len(reversed_ids),
-                },
-            )
+            yield (way.id, seq, 0), candidate(way.id, piece, coords, FORWARD)
+            yield (way.id, seq, 1), candidate(way.id, piece[::-1], coords[::-1], REVERSE)
 
 
 def write_parquet(rows: list[dict], path: Path) -> None:
@@ -415,23 +426,27 @@ def write_parquet(rows: list[dict], path: Path) -> None:
     os.replace(tmp, path)
 
 
-def stage_signature(snapshot: dict, boundary_relation: int, buffer_m: float) -> dict[str, object]:
+def stage_signature(
+    snapshot: dict, boundary_relation: int, buffer_m: float
+) -> dict[tuple[str, str], object]:
     """Everything about a run that changes what comes out of it.
 
-    Dotted paths into the manifest rather than whole blocks, because the
-    manifest's `boundary` block also carries the relation version, which is
-    read *out of* the input rather than given to the run and so cannot be
-    known before it starts.
+    Keyed by the (block, field) it lives at in the manifest rather than by
+    whole blocks, because the `boundary` block also carries the relation
+    version — which is read *out of* the input rather than given to the run,
+    and so cannot be known before it starts.
     """
     return {
-        "osm_snapshot.sha256": snapshot["sha256"],
-        "way_filter.version": PREDICATE_VERSION,
-        "boundary.relation_id": boundary_relation,
-        "boundary.buffer_m": buffer_m,
+        ("osm_snapshot", "sha256"): snapshot["sha256"],
+        ("way_filter", "version"): PREDICATE_VERSION,
+        ("boundary", "relation_id"): boundary_relation,
+        ("boundary", "buffer_m"): buffer_m,
     }
 
 
-def already_done(manifest_path: Path, output_path: Path, signature: dict[str, object]) -> bool:
+def already_done(
+    manifest_path: Path, output_path: Path, signature: dict[tuple[str, str], object]
+) -> bool:
     """Whether a previous run of this exact stage is sitting in the output directory.
 
     This is the "resumable" the ticket asks for: re-running #8 must not
@@ -446,11 +461,9 @@ def already_done(manifest_path: Path, output_path: Path, signature: dict[str, ob
     except (OSError, json.JSONDecodeError):
         # A manifest that cannot be read is a manifest that proves nothing.
         return False
-    for path, expected in signature.items():
-        block, key = path.split(".")
-        if prior.get(block, {}).get(key) != expected:
-            return False
-    return True
+    return all(
+        prior.get(block, {}).get(key) == expected for (block, key), expected in signature.items()
+    )
 
 
 def extract(
@@ -463,8 +476,15 @@ def extract(
 ) -> int:
     if not pbf.is_file():
         raise ExtractError(f"{pbf} is not a file — pass --pbf a Geofabrik .osm.pbf")
-    if index not in osmium.index.map_types():
-        raise ExtractError(f"{index!r} is not a location index — try {DEFAULT_INDEX}")
+    # A file-backed index is spelled `sparse_file_array,/path/to/cache`, so
+    # only the part before the comma is a type name. Checked here rather than
+    # left to libosmium, whose own message arrives after the boundary pass
+    # has already read the file.
+    if index.split(",", 1)[0] not in osmium.index.map_types():
+        raise ExtractError(
+            f"{index!r} is not a location index — try {DEFAULT_INDEX}, or "
+            "sparse_file_array,<path> on a machine short of RAM"
+        )
 
     out.mkdir(parents=True, exist_ok=True)
     output_path = out / OUTPUT_NAME

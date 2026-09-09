@@ -90,6 +90,12 @@ WAYS: list[tuple[int, str, list[int], dict[str, str]]] = [
     # H is a lollipop: it leaves 17, reaches 18, loops through 19 and 20 and
     # returns to 18. Node 18 occurs twice in one way, which is a decision
     # point even though no second way touches it, so H splits at 18.
+    #
+    # #6's plan wrote this case as `17-18-17`, which does not exercise it:
+    # there the repeated node is the way's own two ends, both of which cut
+    # anyway, and the only interior node has degree 1. A lollipop is the
+    # smallest shape where a self-visit is genuinely interior, and it is a
+    # shape real OSM has.
     (208, "H", [17, 18, 19, 20, 18], {"highway": "residential"}),
     # Cyclable, well formed, and 65 km outside the buffered boundary.
     (209, "I", [30, 31], {"highway": "residential"}),

@@ -59,11 +59,19 @@ exactly such a consumer: the credit has to arrive with the data or it does not a
 ## Committed fixtures
 
 `CONTRIBUTING.md` § "Test data" already carries this rule; it is repeated here because this is where
-someone will come looking. A committed fixture `.pbf` is OSM data redistributed in this repo, so
-ODbL applies to it directly: it carries a `README.md` beside it crediting *© OpenStreetMap
-contributors* under ODbL and naming the extract, its snapshot timestamp and its bounding box
-precisely enough to re-cut. A terrain fixture, if one is ever committed, credits *© ČÚZK* under
-CC BY 4.0 the same way.
+someone will come looking. Every committed fixture carries a `README.md` beside it saying where its
+bytes came from, and which of two cases it is.
+
+A fixture **cut** from an extract is OSM data redistributed in this repo, so ODbL applies to it
+directly: its README credits *© OpenStreetMap contributors* under ODbL and names the extract, its
+snapshot timestamp and its bounding box precisely enough to re-cut.
+
+A **synthetic** fixture, written by a generator committed beside it, redistributes no OSM data and
+carries no ODbL obligation. `derive/tests/fixtures/junctions.osm.pbf` is one, and its README says
+so rather than leaving a reader to infer it — the absence of an obligation is a fact worth writing
+down in the same place the obligation would have been.
+
+A terrain fixture, if one is ever committed, credits *© ČÚZK* under CC BY 4.0 the same way.
 
 ## Not a source
 

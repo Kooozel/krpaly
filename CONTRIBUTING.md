@@ -143,8 +143,12 @@ committed fixture `.pbf`**, one okres or less, cut alongside the first
 extraction code rather than before it. A test suite with no committed input
 tests nothing.
 
-That fixture is OSM data redistributed in this repo, so **ODbL applies to it**:
-it carries a `README.md` beside it crediting *© OpenStreetMap contributors*
-under ODbL, and naming the extract, its snapshot timestamp and its bounding box
-precisely enough to re-cut. Terrain fixtures, if any are ever committed, credit
+Every committed fixture carries a `README.md` beside it saying where its bytes
+came from. A fixture *cut* from an extract is OSM data redistributed in this
+repo, so **ODbL applies to it**: the README credits *© OpenStreetMap
+contributors* under ODbL and names the extract, its snapshot timestamp and its
+bounding box precisely enough to re-cut. A *synthetic* fixture — written by a
+committed generator, as `derive/tests/fixtures/junctions.osm.pbf` is —
+redistributes no OSM data and carries no ODbL obligation, and its README says
+so and names the generator. Terrain fixtures, if any are ever committed, credit
 *© ČÚZK* under CC BY 4.0 the same way.

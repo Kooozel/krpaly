@@ -261,6 +261,23 @@ def test_boundary_relation_missing(tmp_path: Path) -> None:
     assert not (tmp_path / "out" / OUTPUT_NAME).exists()
 
 
+def test_accepts_a_file_backed_index(tmp_path: Path) -> None:
+    """`sparse_file_array,<path>` is a location index, not a typo.
+
+    A machine short of RAM passes the file-backed form, and it carries its
+    cache path after a comma — so the type name is only the part before it.
+    """
+    out = tmp_path / "out"
+    assert run(out, "--index", f"sparse_file_array,{tmp_path / 'locations.idx'}") == 0
+    assert len(rows(out)) == 2 * len(EXPECTED_SEGMENTS)
+
+
+def test_unknown_index(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as raised:
+        run(tmp_path / "out", "--index", "nonsense")
+    assert "nonsense" in str(raised.value)
+
+
 def test_missing_pbf(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as raised:
         main(["--pbf", str(tmp_path / "nope.osm.pbf"), "--out", str(tmp_path / "out")])
@@ -273,6 +290,7 @@ def test_geoparquet_metadata(extracted: Path) -> None:
     geo = json.loads(metadata[b"geo"])
     assert geo["primary_column"] == "geometry"
     assert geo["columns"]["geometry"]["encoding"] == "WKB"
-    # null is GeoParquet's own spelling of OGC:CRS84, and keeps the bytes
-    # independent of the installed PROJ.
-    assert geo["columns"]["geometry"]["crs"] is None
+    # Absent, not null. GeoParquet reads an absent `crs` as OGC:CRS84 and an
+    # explicit null as "CRS unknown" — the two are different claims, and this
+    # file is making the first one.
+    assert "crs" not in geo["columns"]["geometry"]

@@ -17,14 +17,16 @@ with everything else that touches the database.
 
 ## Settled constraints
 
-- **Terrain: CC BY 4.0.** ČÚZK publishes DMR5G as open data — attribution only,
-  no share-alike, no non-commercial clause. Credit *© ČÚZK* on the site, in API
-  responses, and in any bulk export. The published raster is **2 m**; the quoted
-  0.18 m accuracy belongs to the source point cloud.
+- **Terrain: CC BY 4.0.** ČÚZK publishes DMR 5G as open data — attribution
+  only, no share-alike, no non-commercial clause. It ships as LAZ point data in
+  a TIN, not as a raster; the 2 m grid is ČÚZK's ImageServer mosaic derived from
+  it, and the accuracy that matters here is **0,3 m under forest** rather than
+  the 0,18 m quoted for open terrain. `derive/INPUTS.md` pins the source and
+  `ATTRIBUTION.md` carries the credit strings.
 - **ODbL likely applies to the table.** A database derived from OSM geometry is
   probably a Derivative Database. Rendered pages and profiles are Produced Works
   and can be licensed freely. The CC BY terrain layer mixes in cleanly — OSM is
-  the sole source of the obligation.
+  the sole source of the obligation. See `ATTRIBUTION.md`.
 - **Strava cannot power a social layer.** Its API terms forbid cross-user
   display and aggregation. Any community data must come from GPX/FIT files
   uploaded directly.
@@ -41,4 +43,5 @@ with everything else that touches the database.
 ## Status
 
 Governance and the Python toolchain are in place — `make check` is the gate,
-and it grows a step as each of the three areas lands. Nothing is derived yet.
+and it grows a step as each of the three areas lands. The derivation's inputs
+are pinned in `derive/INPUTS.md`. Nothing is derived yet.

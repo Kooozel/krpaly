@@ -8,13 +8,17 @@ repository.
 ```sh
 make check                                                    # the `check` job, verbatim
 node scripts/check-pr-title.mjs "<your pull request title>"   # the `pr-title` job
-make format                                                   # ruff format + ruff check --fix
+make format                                                   # ruff format/check --fix + sqlfluff fix
 ```
 
 CI runs the `Makefile` itself rather than a copy of its steps, so the two cannot drift. It needs
 `uv` on `PATH` and nothing else — it fetches the Python in `derive/.python-version` (3.13) and the
 tools in `derive/uv.lock` itself. Every `uv run` passes `--locked`, so a `uv.lock` that has fallen
 behind `pyproject.toml` fails the gate instead of being rewritten under it.
+
+The one exception is the schema tests, which want a real PostGIS and skip on an unset
+`DATABASE_URL`. CI supplies one as a service container and never skips; locally the rest of the
+gate, `sqlfluff` included, runs without it. `db/README.md` has the `docker run` recipe.
 
 `check` is **one job with one step per area**, because the three areas arrive at different times:
 one required context, one gate per area, and no pull request blocked on a language it did not
@@ -27,8 +31,8 @@ git ls-files --cached --others --exclude-standard 'derive/*.py'
 ```
 
 — where `--others` is the half that makes a new, still-untracked `.py` turn its area on. `derive/`
-therefore carries `pyproject.toml`, `.python-version` and `uv.lock` today with its steps off, and
-they come on with the first `.py` without the workflow being touched.
+and `db/` have both switched on this way, without the workflow being touched; `web/` is the one
+still waiting, on a `web/package.json`.
 
 `pytest` is gated on test files separately from `ruff`, because pytest exits 5 when it collects
 nothing.
@@ -56,10 +60,11 @@ Derivation lives here rather than in its own repo because it shares the schema w
 that touches the database.
 
 **Present: `.gitignore`, `LICENSE`, `README.md`, `CONTRIBUTING.md`, `ATTRIBUTION.md`, `Makefile`,
-`scripts/`, `docs/agents/`, `.github/` — and `derive/`, which has its toolchain, its `make check`
-step and `INPUTS.md`, but not a line of pipeline code.** Everything below about `db/` and `web/` is
-settled intent, not present code — it is written down because these are decisions that are
-expensive to reverse once rows exist, not because the code is there to read.
+`scripts/`, `docs/agents/`, `.github/`; `derive/`, which has its toolchain, `INPUTS.md` and the
+migration runner but not a line of pipeline code; and `db/`, which has the schema, its migrations
+and `db/README.md`.** Everything below about `web/` is settled intent, not present code — it is
+written down because these are decisions that are expensive to reverse once rows exist, not because
+the code is there to read.
 
 ## Constraints that bind work before it is written
 

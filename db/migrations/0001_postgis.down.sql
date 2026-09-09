@@ -1,0 +1,5 @@
+-- Deliberately empty. 0001's `up` is `create extension if not exists postgis`,
+-- which is a no-op on any PostGIS image: the extension is already there.
+-- Dropping it here would remove something this migration did not create — and
+-- would fail regardless, because postgis_topology and postgis_tiger_geocoder
+-- depend on it.

@@ -42,5 +42,7 @@ with everything else that touches the database.
 ## Status
 
 Governance and the Python toolchain are in place — `make check` is the gate,
-and it grows a step as each of the three areas lands. The derivation's inputs
-are pinned in `derive/INPUTS.md`. Nothing is derived yet.
+and it grows a step as each of the three areas lands; `derive/` and `db/` have
+theirs, `web/` still skips. The derivation's inputs are pinned in
+`derive/INPUTS.md`, and the schema they will be written into is in
+`db/README.md`. Nothing is derived yet.

@@ -173,15 +173,22 @@ Ostrava returns `ModelPixelScale (2, 2, 0)`, `ModelTiepoint (0, 0, 0, xmin, ymax
 
 `CLAUDE.md` requires that nodata be reported and never absorbed. On this service that is not a
 precaution against a hypothetical hole — the default response *is* fictional, in two different ways
-at once. Both were measured on one 8 × 16 km window straddling the Polish border north of Ostrava
-(400 × 800 px, 320 000 pixels):
+at once. Both were measured on one window straddling the Polish border north of Ostrava, requested
+twice at **native 2 m** and differing only in the `noData` parameter:
+
+```
+bbox=-470000,-1089248,-467952,-1085152&size=1024,2048     2.048 × 4.096 km, 2 097 152 px
+```
 
 | | without `noData` | with `noData=-9999` |
 | --- | --- | --- |
-| pixels in tiles the server omits entirely | 239 616 | 239 616 |
-| uncovered pixels inside present tiles | 33 876, valued **0.0** | 33 876, valued −9999 |
+| pixels in tiles the server omits entirely | 1 736 704 (106 of 128 tiles) | 1 736 704 |
+| uncovered pixels inside present tiles | 101 957, valued **0.0** | 101 957, valued −9999 |
 | `GDAL_NODATA` tag (42113) | **absent** | present |
-| real terrain | 46 508 px, 188.4–276.2 m | identical |
+| real terrain | 258 491 px, 202.60–216.72 m | identical |
+
+Both responses carry `ModelPixelScale (2, 2, 0)`, so nothing here is an artefact of resampling: the
+three counts sum to the full 2 097 152, and only **12 %** of the window is terrain.
 
 Two consequences, both mandatory for #7:
 
@@ -379,7 +386,9 @@ file /tmp/dmr5g-probe.tif
 
 Expect `TIFF image data, little-endian, ..., height=200, bps=32, compression=none, ..., width=200`.
 Terrain over that window runs 201.31–225.62 m. Repeat with `&noData=-9999` over a window crossing
-the border — `bbox=-472000,-1092000,-464000,-1076000&size=400,800` — to see the nodata table above.
+the border — the `bbox` and `size` in the Nodata section, which are native 2 m — to see that table.
+Both requests return `ModelPixelScale (2, 2, 0)`; if yours does not, the `size` no longer matches
+the `bbox` and the server has resampled.
 
 ## Attribution
 

@@ -97,7 +97,7 @@ These are the ones where doing it wrong means re-deriving rather than patching.
   data in a TIN, and the 2 m figure is the cell size of ČÚZK's ImageServer mosaic, a service
   derived from it. The point cloud *is* the product, so 0,18 m is delivered accuracy — in open
   terrain. The number that matters for Czech climbs is the other one, **0,3 m under forest**. And
-  DMR5G is still not DMR4G: INSPIRE `EL-GRID` looks like the obvious download and is 4G.
+  DMR 5G is still not DMR 4G: INSPIRE `EL-GRID` looks like the obvious download and is 4G.
   `derive/INPUTS.md` pins the product, the route and its limitations.
 - **ODbL probably applies to the table.** A database derived from OSM geometry is likely a
   Derivative Database. Rendered pages and profiles are Produced Works and can be licensed freely.

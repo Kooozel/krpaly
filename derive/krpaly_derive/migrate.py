@@ -20,10 +20,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-# NNNN_<name>.up.sql / NNNN_<name>.down.sql. Four digits because the number is
-# sorted numerically but printed as text, and a fixed width keeps the two
-# orders looking alike in a directory listing.
-FILENAME = re.compile(r"^(?P<version>\d{4})_(?P<name>[a-z0-9_]+)\.up\.sql$")
+import psycopg
+
+# Matches the `up` half only: discovery walks the ups and derives each down
+# from its name, so a missing down is a message rather than a file silently
+# absent from the listing. Four digits because the number is sorted numerically
+# but printed as text, and a fixed width keeps the two orders looking alike in
+# a directory listing.
+UP_FILENAME = re.compile(r"^(?P<version>\d{4})_(?P<name>[a-z0-9_]+)\.up\.sql$")
 
 # The version below the first migration: `down --to 0000` unwinds everything.
 ZERO = "0000"
@@ -38,6 +42,19 @@ create table if not exists schema_migrations (
 
 class MigrationError(Exception):
     """A migration directory that cannot be trusted to apply in order."""
+
+
+def normalise_version(value: str) -> str:
+    """`2` and `0002` are the same version; `two` is not a version.
+
+    Versions are compared as strings, which is only equivalent to comparing
+    them as numbers while every one of them is four digits wide. A `--to 2`
+    left unpadded compares greater than `0004` and would silently apply
+    everything the flag was asking it to stop short of.
+    """
+    if not value.isdigit():
+        raise MigrationError(f"{value!r} is not a version — expected a number like 0002")
+    return f"{int(value):04d}"
 
 
 @dataclass(frozen=True)
@@ -69,7 +86,7 @@ def discover(directory: Path | None = None) -> list[Migration]:
     by_version: dict[str, Migration] = {}
 
     for path in sorted(directory.glob("*.up.sql")):
-        match = FILENAME.match(path.name)
+        match = UP_FILENAME.match(path.name)
         if match is None:
             raise MigrationError(
                 f"{path.name} is not NNNN_<name>.up.sql — four digits, then a lowercase name"
@@ -124,8 +141,9 @@ def apply_up(conn, migrations: Iterable[Migration], to: str | None = None) -> li
     something that did not run.
     """
     already = applied_versions(conn)
+    limit = normalise_version(to) if to is not None else None
     pending = [
-        m for m in migrations if m.version not in already and (to is None or m.version <= to)
+        m for m in migrations if m.version not in already and (limit is None or m.version <= limit)
     ]
     for migration in pending:
         with conn.transaction(), conn.cursor() as cur:
@@ -138,7 +156,10 @@ def apply_up(conn, migrations: Iterable[Migration], to: str | None = None) -> li
 def apply_down(conn, migrations: Iterable[Migration], to: str = ZERO) -> list[Migration]:
     """Roll back to `to`, exclusive — `down --to 0002` leaves 0002 applied."""
     already = applied_versions(conn)
-    unwinding = [m for m in reversed(list(migrations)) if m.version in already and m.version > to]
+    limit = normalise_version(to)
+    unwinding = [
+        m for m in reversed(list(migrations)) if m.version in already and m.version > limit
+    ]
     for migration in unwinding:
         with conn.transaction(), conn.cursor() as cur:
             cur.execute(migration.down.read_text())
@@ -148,8 +169,6 @@ def apply_down(conn, migrations: Iterable[Migration], to: str = ZERO) -> list[Mi
 
 
 def connect():
-    import psycopg
-
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise SystemExit("DATABASE_URL is not set — see db/README.md for a local PostGIS")
@@ -172,13 +191,19 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    migrations = discover()
 
-    with connect() as conn:
-        if args.command == "up":
-            changed = apply_up(conn, migrations, to=args.to)
-        else:
-            changed = apply_down(conn, migrations, to=args.to)
+    # A malformed --to or an untrustworthy migrations/ is the operator's
+    # mistake, not a crash: say what is wrong on one line rather than making
+    # them read a traceback for it.
+    try:
+        migrations = discover()
+        with connect() as conn:
+            if args.command == "up":
+                changed = apply_up(conn, migrations, to=args.to)
+            else:
+                changed = apply_down(conn, migrations, to=args.to)
+    except MigrationError as error:
+        raise SystemExit(f"migrate: {error}") from error
 
     if not changed:
         print("nothing to do", file=sys.stderr)

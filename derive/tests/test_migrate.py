@@ -12,6 +12,7 @@ discovery tests and the SQL lint.
 import os
 from pathlib import Path
 
+import psycopg
 import pytest
 
 from krpaly_derive.migrate import (
@@ -21,6 +22,7 @@ from krpaly_derive.migrate import (
     apply_up,
     discover,
     ensure_bookkeeping,
+    normalise_version,
 )
 
 REQUIRES_DB = pytest.mark.skipif(
@@ -105,13 +107,25 @@ def test_an_empty_directory_is_not_an_error(tmp_path):
     assert discover(tmp_path) == []
 
 
+@pytest.mark.parametrize(("given", "expected"), [("2", "0002"), ("0002", "0002"), ("0", "0000")])
+def test_a_version_is_normalised_before_it_is_compared(given, expected):
+    # Versions are compared as strings, which only matches comparing them as
+    # numbers while every one is four digits wide. Unpadded, '2' sorts above
+    # '0004' and `up --to 2` would apply everything it was asked to stop short
+    # of.
+    assert normalise_version(given) == expected
+
+
+def test_a_version_that_is_not_a_number_raises():
+    with pytest.raises(MigrationError, match="two"):
+        normalise_version("two")
+
+
 # --- the database ----------------------------------------------------------
 
 
 @pytest.fixture
 def conn():
-    import psycopg
-
     with psycopg.connect(os.environ["DATABASE_URL"]) as connection:
         with connection.cursor() as cur:
             cur.execute(
@@ -134,40 +148,39 @@ def table_names(conn) -> set[str]:
         return {row[0] for row in cur.fetchall()}
 
 
-def insert_derivation(conn, **overrides) -> int:
-    values = PINNED_DERIVATION | overrides
+# A climb that differs from its neighbours only where a test says so, so each
+# test names the one column it is about and nothing else.
+A_CLIMB = {
+    "region_code": "CZ080",
+    "way_refs": [1, 2, 3],
+    "start_node_id": 10,
+    "end_node_id": 20,
+    "start_pt": "SRID=4326;POINT(18.29 49.83)",
+    "top_pt": "SRID=4326;POINT(18.30 49.84)",
+    "dist_m": 1000.0,
+    "gain_m": 80.0,
+    "avg_grade": 8.0,
+    "max_grade": 12.5,
+}
+
+
+def insert_row(conn, table: str, values: dict) -> int:
     columns = ", ".join(values)
-    placeholders = ", ".join(f"%({k})s" for k in values)
+    placeholders = ", ".join(f"%({column})s" for column in values)
     with conn.cursor() as cur:
         cur.execute(
-            f"insert into derivation ({columns}) values ({placeholders}) returning id",
+            f"insert into {table} ({columns}) values ({placeholders}) returning id",
             values,
         )
         return cur.fetchone()[0]
+
+
+def insert_derivation(conn, **overrides) -> int:
+    return insert_row(conn, "derivation", PINNED_DERIVATION | overrides)
 
 
 def insert_climb(conn, derivation_id: int, **overrides) -> int:
-    values = {
-        "derivation_id": derivation_id,
-        "region_code": "CZ080",
-        "way_refs": [1, 2, 3],
-        "start_node_id": 10,
-        "end_node_id": 20,
-        "start_pt": "SRID=4326;POINT(18.29 49.83)",
-        "top_pt": "SRID=4326;POINT(18.30 49.84)",
-        "dist_m": 1000.0,
-        "gain_m": 80.0,
-        "avg_grade": 8.0,
-        "max_grade": 12.5,
-    } | overrides
-    columns = ", ".join(values)
-    placeholders = ", ".join(f"%({k})s" for k in values)
-    with conn.cursor() as cur:
-        cur.execute(
-            f"insert into climb ({columns}) values ({placeholders}) returning id",
-            values,
-        )
-        return cur.fetchone()[0]
+    return insert_row(conn, "climb", A_CLIMB | {"derivation_id": derivation_id} | overrides)
 
 
 @REQUIRES_DB
@@ -204,6 +217,14 @@ def test_down_to_a_version_stops_there(migrated):
     assert applied_versions(migrated) == {"0001", "0002"}
     assert "region" in table_names(migrated)
     assert "climb" not in table_names(migrated)
+
+
+@REQUIRES_DB
+@pytest.mark.parametrize("to", ["0002", "2"])
+def test_up_to_a_version_stops_there_padded_or_not(conn, to):
+    apply_up(conn, discover(), to=to)
+    assert applied_versions(conn) == {"0001", "0002"}
+    assert "climb" not in table_names(conn)
 
 
 @REQUIRES_DB
@@ -251,24 +272,18 @@ def test_a_derivation_carries_the_pinned_inputs_from_issue_4(migrated):
 @REQUIRES_DB
 @pytest.mark.parametrize("bad_commit", ["abc123", "z" * 40, "A" * 40, ""])
 def test_engine_commit_must_be_a_full_hex_sha(migrated, bad_commit):
-    import psycopg
-
     with pytest.raises(psycopg.errors.CheckViolation):
         insert_derivation(migrated, engine_commit=bad_commit)
 
 
 @REQUIRES_DB
 def test_scoring_model_rejects_an_unknown_model(migrated):
-    import psycopg
-
     with pytest.raises(psycopg.errors.CheckViolation):
         insert_derivation(migrated, scoring_model="strava")
 
 
 @REQUIRES_DB
 def test_the_anchor_is_unique_within_a_derivation(migrated):
-    import psycopg
-
     derivation_id = insert_derivation(migrated)
     insert_climb(migrated, derivation_id)
     with pytest.raises(psycopg.errors.UniqueViolation):
@@ -302,8 +317,6 @@ def test_two_unnamed_climbs_coexist_in_one_derivation(migrated):
 
 @REQUIRES_DB
 def test_a_climb_needs_at_least_one_way(migrated):
-    import psycopg
-
     derivation_id = insert_derivation(migrated)
     with pytest.raises(psycopg.errors.CheckViolation):
         insert_climb(migrated, derivation_id, way_refs=[])
@@ -315,8 +328,6 @@ def test_a_profile_needs_one_elevation_per_vertex(migrated, elevations):
     # The empty list is the case a bare `array_length(...) = st_npoints(...)`
     # lets through: array_length of an empty array is null, and a null CHECK
     # passes.
-    import psycopg
-
     climb_id = insert_climb(migrated, insert_derivation(migrated))
     with pytest.raises(psycopg.errors.CheckViolation), migrated.cursor() as cur:
         cur.execute(

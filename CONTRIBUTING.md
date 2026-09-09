@@ -101,15 +101,14 @@ be worse — a context that never reports blocks every pull request forever, wit
 no error that says so. The areas run in order and the first failure stops the
 rest, so a red gate reports one area at a time rather than all three.
 
-The switch is *files*, not directories: `derive/` carries its toolchain config
-today and its steps are still off, and they come on with the first `.py` in it
-without the workflow being touched. `db/`'s step is `sqlfluff lint` over the
-migrations, run out of `derive/`'s locked environment because that is the
-repo's only Python toolchain. `web/`'s step waits for a `web/package.json` and
-is then `npm --prefix web
-ci` followed by `npm --prefix web run check` — a `package.json` committed
-without its `package-lock.json` fails loudly too, because `npm ci` needs the
-lockfile.
+The switch is *files*, not directories. `derive/` and `db/` both turned their
+steps on this way — the first `.py` and the first `.sql` — without the workflow
+being touched. `db/`'s step is `sqlfluff lint` over the migrations, run out of
+`derive/`'s locked environment because that is the repo's only Python
+toolchain. `web/` is the one still waiting: its step wants a
+`web/package.json`, and is then `npm --prefix web ci` followed by
+`npm --prefix web run check` — a `package.json` committed without its
+`package-lock.json` fails loudly too, because `npm ci` needs the lockfile.
 
 Today `make check` runs `ruff format --check`, `ruff check` and `pytest`
 against `derive/`, then `sqlfluff lint` against `db/`, and skips `web/`.

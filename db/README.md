@@ -21,7 +21,8 @@ uv run --directory derive python -m krpaly_derive.migrate down --to 0000 # unwin
 ```
 
 `--to` is inclusive going up and exclusive coming down, which is the reading that makes
-`up --to N` and `down --to N` land on the same schema.
+`up --to N` and `down --to N` land on the same schema. It is zero-padded for you, so `--to 2` and
+`--to 0002` are the same request.
 
 Each migration and its `schema_migrations` insert share one transaction, so a failure leaves neither
 a half-applied file nor a version recorded for something that did not run. `schema_migrations` is
@@ -36,11 +37,20 @@ database rather than after.
 
 ```sh
 docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres --name krpaly-pg postgis/postgis:17-3.5
+
+# Wait for the real server. The image's initdb brings up a temporary one first,
+# and `pg_isready` answers for that one too — connect on the way past it and
+# the server closes the connection mid-request.
+until docker exec krpaly-pg psql -U postgres -c 'select 1' >/dev/null 2>&1; do sleep 1; done
+
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 uv run --directory derive python -m krpaly_derive.migrate up
 make check          # the schema tests now run instead of skipping
 docker rm -f krpaly-pg
 ```
+
+`down --to 0000` leaves `schema_migrations` and PostGIS's own `spatial_ref_sys` behind, and nothing
+else — the first is the runner's bookkeeping and the second belongs to the extension.
 
 Without `DATABASE_URL` the schema tests skip and everything else in `make check` still runs — the
 SQL lint included. CI always sets it, so CI never skips.

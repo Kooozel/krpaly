@@ -44,6 +44,7 @@ from krpaly_derive.dem import (
     plan_tiles,
     tile_bbox,
     tile_index,
+    tile_indices,
     tile_name,
     tile_span,
     window_url,
@@ -155,7 +156,7 @@ class Service:
             raise DemError("the connection dropped")
         self.urls.append(url)
 
-        query = dict(part.split("=", 1) for part in url.split("?", 1)[1].split("&"))
+        query = query_of(url)
         xmin, ymin, xmax, ymax = (float(v) for v in query["bbox"].replace("%2C", ",").split(","))
         width, height = (int(v) for v in query["size"].replace("%2C", ",").split(","))
 
@@ -188,6 +189,10 @@ class Service:
             with memory.open(**profile) as raster:
                 raster.write(band, 1)
             return memory.read()
+
+
+def query_of(url: str) -> dict[str, str]:
+    return dict(part.split("=", 1) for part in url.split("?", 1)[1].split("&"))
 
 
 def run(out: Path, service: Service, **extra) -> int:
@@ -245,6 +250,14 @@ def test_tile_index_at_negative_coordinates() -> None:
     assert tile_index(float((BX + 1) * span), span) == BX + 1
     assert tile_index(float(BX * span) - 0.5, span) == BX - 1
 
+    # `plan_tiles` does not call `tile_index` — it cannot, over a million
+    # vertices — so pinning the scalar alone would pin a function nothing in
+    # production runs. The two spellings of the rule are asserted equal.
+    probes = [-469900.0, -1104000.0, float(BX * span), float(BX * span) - 0.5, 0.0, 1.0, -1.0]
+    assert list(tile_indices(np.array(probes), span)) == [
+        tile_index(value, span) for value in probes
+    ]
+
 
 def test_tile_bboxes_are_grid_anchored() -> None:
     span = tile_span(TILE_PX)
@@ -282,7 +295,7 @@ def test_request_shape(fetched: tuple[Path, Service]) -> None:
     _out, service = fetched
     assert len(service.urls) == len(PLANNED)
     for url in service.urls:
-        query = dict(part.split("=", 1) for part in url.split("?", 1)[1].split("&"))
+        query = query_of(url)
         assert query["bboxSR"] == str(DEM_CRS)
         assert query["imageSR"] == str(DEM_CRS)
         assert query["pixelType"] == "F32"
@@ -341,25 +354,7 @@ def test_rejects_a_window_without_nodata(staged: Path) -> None:
     assert not list((staged / TILE_DIR).glob("*.tif"))
 
 
-def test_rejects_a_json_error_response(monkeypatch) -> None:
-    body = b'{"error":{"code":400,"message":"Invalid or missing input parameters."}}'
-    monkeypatch.setattr("urllib.request.urlopen", _responder([body]))
-    with pytest.raises(DemError) as raised:
-        fetch_window("https://example.invalid/exportImage?f=image", 1.0, 1)
-    assert "not a GeoTIFF" in str(raised.value)
-    assert "Invalid or missing input parameters" in str(raised.value)
-
-
-def test_retries_a_transient_failure(monkeypatch) -> None:
-    good = b"II*\x00" + b"\x00" * 60
-    monkeypatch.setattr("krpaly_derive.dem.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr(
-        "urllib.request.urlopen", _responder([OSError("reset"), OSError("reset"), good])
-    )
-    assert fetch_window("https://example.invalid/exportImage", 1.0, 3) == good
-
-
-def _responder(script: list):
+def responder(script: list):
     """A fake `urlopen` that plays a script of bodies and errors, in order."""
     remaining = list(script)
 
@@ -384,6 +379,24 @@ def _responder(script: list):
         return Response(item)
 
     return urlopen
+
+
+def test_rejects_a_json_error_response(monkeypatch) -> None:
+    body = b'{"error":{"code":400,"message":"Invalid or missing input parameters."}}'
+    monkeypatch.setattr("urllib.request.urlopen", responder([body]))
+    with pytest.raises(DemError) as raised:
+        fetch_window("https://example.invalid/exportImage?f=image", 1.0, 1)
+    assert "not a GeoTIFF" in str(raised.value)
+    assert "Invalid or missing input parameters" in str(raised.value)
+
+
+def test_retries_a_transient_failure(monkeypatch) -> None:
+    good = b"II*\x00" + b"\x00" * 60
+    monkeypatch.setattr("krpaly_derive.dem.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "urllib.request.urlopen", responder([OSError("reset"), OSError("reset"), good])
+    )
+    assert fetch_window("https://example.invalid/exportImage", 1.0, 3) == good
 
 
 # --- resume, re-entrancy and the manifest ------------------------------------
@@ -513,6 +526,23 @@ def test_tile_px_ceiling(staged: Path) -> None:
     assert not (staged / TILE_DIR).exists()
 
 
+def test_main_runs_on_its_defaults(staged: Path, monkeypatch) -> None:
+    """The argparse defaults, exercised — including `<out>/candidates.parquet`.
+
+    `fetch` resolves its fetcher at call time rather than binding one as a
+    default argument, which is what lets this reach the CLI without a socket.
+    """
+    service = Service()
+    monkeypatch.setattr("krpaly_derive.dem.fetch_window", service)
+    monkeypatch.setattr("krpaly_derive.dem.DEFAULT_TILE_PX", TILE_PX)
+    monkeypatch.setattr("krpaly_derive.dem.DEFAULT_HALO_M", HALO_M)
+
+    assert main(["--out", str(staged)]) == 0
+    assert len(service.urls) == len(PLANNED)
+    assert manifest_of(staged)["source"]["file"] == "candidates.parquet"
+    assert manifest_of(staged)["run"]["complete"] is True
+
+
 def test_missing_candidates(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as raised:
         main(["--out", str(tmp_path / "nowhere")])
@@ -542,6 +572,33 @@ def test_nodata_counted_not_absorbed(fetched: tuple[Path, Service]) -> None:
     assert by_tile[EAST]["zero_px"] == 1
     assert written["counts"]["zero_px"] == 1
     assert written["counts"]["px_total"] == len(PLANNED) * TILE_PX * TILE_PX
+
+
+def test_fetch_time_survives_the_verification_rerun(staged: Path) -> None:
+    """#7 asks for the wall clock, then asks for a re-run that would erase it.
+
+    The fetch duration accumulates across resumes and is preserved by a run
+    that fetches nothing, so the figure the ticket wants outlives the
+    verification the same ticket mandates.
+    """
+    assert run(staged, Service(), limit=2) == 1
+    first = manifest_of(staged)["dem"]["fetch_wall_clock_s"]
+    assert first > 0
+
+    assert run(staged, Service()) == 0
+    second = manifest_of(staged)["dem"]["fetch_wall_clock_s"]
+    assert second > first  # the resumed tile added to it, rather than replacing it
+
+    assert run(staged, Service()) == 0
+    assert manifest_of(staged)["dem"]["fetch_wall_clock_s"] == second
+
+
+def test_records_the_crs_the_windows_declare(fetched: tuple[Path, Service]) -> None:
+    """#7: "the CRS as the files actually declare it" — not the one asked for."""
+    out, _service = fetched
+    declared = manifest_of(out)["dem"]["crs_declared_as"]
+    assert "5514" in declared
+    assert manifest_of(out)["dem"]["crs"] == DEM_CRS
 
 
 def test_tiles_are_listed_in_grid_order(fetched: tuple[Path, Service]) -> None:

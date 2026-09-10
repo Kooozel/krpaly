@@ -40,7 +40,6 @@ here was supposed to settle.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -60,6 +59,12 @@ import pyarrow.parquet as pq
 import rasterio
 import shapely
 from pyproj import Transformer
+
+# This stage consumes #6's output, so the two facts it needs about that file —
+# how a forward row spells its direction, and how a checksum over it is taken —
+# are read from the module that writes it rather than said again here. A copy
+# of either is a place for the two stages to drift apart.
+from krpaly_derive.extract import FORWARD, sha256_of
 
 # The export route, and the only one available: the service's capabilities are
 # `Catalog,Mensuration,Image,Metadata` — there is no `Download` operation, and
@@ -114,10 +119,6 @@ GRID_ORIGIN = (0, 0)
 SOURCE_CRS = "OGC:CRS84"
 PROJECTED_CRS = f"EPSG:{DEM_CRS}"
 
-# Only the forward rows are planned against: the reverse row is the same
-# geometry mirrored, so half of a candidates file is a duplicate here.
-FORWARD = "forward"
-
 SOURCE_NAME = "candidates.parquet"
 OUTPUT_NAME = "dem.vrt"
 MANIFEST_NAME = "dem.manifest.json"
@@ -162,14 +163,7 @@ class WindowStats:
     zero_px: int
     min_m: float | None
     max_m: float | None
-
-
-def sha256_of(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    crs_declared_as: str
 
 
 def tile_span(tile_px: int) -> int:
@@ -187,6 +181,17 @@ def tile_index(value: float, span: int) -> int:
     tile away from the road that caused it.
     """
     return math.floor(value / span)
+
+
+def tile_indices(values: np.ndarray, span: int) -> np.ndarray:
+    """`tile_index` over an array, which is how the planner actually asks.
+
+    Split out rather than inlined so the rule has exactly one statement of
+    itself: a test that pins `tile_index` at negative coordinates and leaves
+    the planner computing its own `np.floor` would be pinning a function
+    nothing in production calls.
+    """
+    return np.floor(values / span).astype(np.int64)
 
 
 def tile_bbox(tx: int, ty: int, span: int) -> tuple[int, int, int, int]:
@@ -218,7 +223,7 @@ def transformer() -> Transformer:
     return Transformer.from_crs(SOURCE_CRS, PROJECTED_CRS, always_xy=True)
 
 
-def _segments(candidates: Path, to_metres: Transformer) -> tuple[np.ndarray, ...]:
+def segments_in_metres(candidates: Path, to_metres: Transformer) -> tuple[np.ndarray, ...]:
     """Every forward candidate's consecutive coordinate pairs, in metres.
 
     Vectorised throughout: a kraj is on the order of a million vertices, and
@@ -246,7 +251,7 @@ def _segments(candidates: Path, to_metres: Transformer) -> tuple[np.ndarray, ...
     return x[head], y[head], x[head + 1], y[head + 1]
 
 
-def _subdivide(
+def subdivide(
     x0: np.ndarray, y0: np.ndarray, x1: np.ndarray, y1: np.ndarray, max_step: float
 ) -> tuple[np.ndarray, ...]:
     """Cut segments longer than half a tile into equal pieces.
@@ -286,7 +291,7 @@ def plan_tiles(candidates: Path, tile_px: int, halo_m: float) -> list[tuple[int,
     never fetched. Emission order is the determinism guarantee, as it is in #6.
     """
     span = tile_span(tile_px)
-    x0, y0, x1, y1 = _subdivide(*_segments(candidates, transformer()), max_step=span / 2)
+    x0, y0, x1, y1 = subdivide(*segments_in_metres(candidates, transformer()), max_step=span / 2)
 
     lo_x = np.minimum(x0, x1) - halo_m
     hi_x = np.maximum(x0, x1) + halo_m
@@ -297,8 +302,8 @@ def plan_tiles(candidates: Path, tile_px: int, halo_m: float) -> list[tuple[int,
     # the two agree except when `hi` lands exactly on a tile edge, where floor
     # would pull in a tile the box only touches. `maximum` covers the
     # degenerate box that is entirely on one edge.
-    tx_lo = np.floor(lo_x / span).astype(np.int64)
-    ty_lo = np.floor(lo_y / span).astype(np.int64)
+    tx_lo = tile_indices(lo_x, span)
+    ty_lo = tile_indices(lo_y, span)
     tx_hi = np.maximum(np.ceil(hi_x / span).astype(np.int64) - 1, tx_lo)
     ty_hi = np.maximum(np.ceil(hi_y / span).astype(np.int64) - 1, ty_lo)
 
@@ -435,6 +440,7 @@ def validate(data: bytes, bbox: tuple[int, int, int, int], tile_px: int) -> Wind
         if faults:
             raise DemError("; ".join(faults))
         band = window.read(1)
+        crs_wkt = window.crs.to_wkt()
 
     real = band[band != NODATA]
     return WindowStats(
@@ -446,6 +452,7 @@ def validate(data: bytes, bbox: tuple[int, int, int, int], tile_px: int) -> Wind
         zero_px=int(np.count_nonzero(band == 0.0)),
         min_m=float(real.min()) if real.size else None,
         max_m=float(real.max()) if real.size else None,
+        crs_declared_as=crs_wkt,
     )
 
 
@@ -592,6 +599,38 @@ def check_arguments(candidates: Path, tile_px: int, halo_m: float) -> None:
         )
 
 
+def report(written: dict, fetched: int, reused: int) -> None:
+    """What the run cost and what it holds, on stderr, as `extract.py` reports.
+
+    The disk figure and the accumulated fetch time are #7's deliverable, so
+    they are said out loud rather than left for someone to read out of the
+    manifest.
+    """
+    counts = written["counts"]
+    print(
+        f"tiles: {counts['tiles_present']}/{counts['tiles']} present, "
+        f"{fetched} fetched, {reused} reused, {counts['bytes_total'] / 1e9:.2f} GB",
+        file=sys.stderr,
+    )
+    print(
+        f"nodata: {counts['nodata_px']} of {counts['px_total']} px "
+        f"({100 * counts['nodata_px'] / max(counts['px_total'], 1):.1f}%), "
+        f"{counts['tiles_all_nodata']} tiles wholly uncovered",
+        file=sys.stderr,
+    )
+    if counts["zero_px"]:
+        print(
+            f"zero: {counts['zero_px']} px at exactly 0.0 — 0 m is not an elevation in Czechia, "
+            "so the noData parameter is not being applied. #8 must not sample these",
+            file=sys.stderr,
+        )
+    print(
+        f"fetching: {written['dem']['fetch_wall_clock_s']} s in total, "
+        f"this run {written['run']['wall_clock_s']} s",
+        file=sys.stderr,
+    )
+
+
 def fetch(
     out: Path,
     candidates: Path,
@@ -602,8 +641,12 @@ def fetch(
     limit: int | None,
     dry_run: bool,
     force: bool,
-    window_fetcher: Callable[[str, float, int], bytes] = fetch_window,
+    window_fetcher: Callable[[str, float, int], bytes] | None = None,
 ) -> int:
+    # Resolved here rather than as a default argument, which would bind at
+    # import time and leave `main` — and therefore every argparse default —
+    # untestable without a socket.
+    window_fetcher = window_fetcher or fetch_window
     check_arguments(candidates, tile_px, halo_m)
 
     started = time.monotonic()
@@ -660,7 +703,25 @@ def fetch(
     prior_tiles = {(entry["tx"], entry["ty"]): entry for entry in prior.get("tiles", [])}
     entries: dict[tuple[int, int], dict] = {}
     fetched = reused = 0
-    fetched_at = prior.get("dem", {}).get("fetched_at")
+
+    prior_dem = prior.get("dem", {})
+    fetched_at = prior_dem.get("fetched_at")
+    # Accumulated across resumes and preserved by a run that fetches nothing,
+    # because #7 asks for the wall clock as a deliverable and the run that
+    # produces it is followed, by the same ticket, by a verification re-run
+    # that would otherwise overwrite it with its own few seconds.
+    fetch_wall_clock_s = prior_dem.get("fetch_wall_clock_s") or 0.0
+    crs_declared_as = prior_dem.get("crs_declared_as")
+
+    source_sha256 = sha256_of(candidates)
+    planned_names = {tile_name(tx, ty) for tx, ty in plan}
+    unplanned = sorted(
+        path.name for path in tile_dir.glob("*.tif") if path.name not in planned_names
+    )
+    if unplanned:
+        # Never deleted: this stage does not get to decide that a file the
+        # operator has is garbage. It is a shrunken plan, not a mistake.
+        print(f"on disk: {len(unplanned)} tiles this plan does not name, kept", file=sys.stderr)
 
     def manifest(complete: bool) -> dict:
         ordered = [entries[key] for key in sorted(entries)]
@@ -679,6 +740,16 @@ def fetch(
                 # or "the manifest minus `run` is identical" stops being true
                 # and #5's `dem_fetched_at` starts lying.
                 "fetched_at": started_at if fetched else fetched_at,
+                "fetch_wall_clock_s": (
+                    round(fetch_wall_clock_s + time.monotonic() - started, 3)
+                    if fetched
+                    else fetch_wall_clock_s
+                ),
+                # What the windows themselves say, which is not the constant
+                # that was asked for: this service declares EPSG:5514 through a
+                # citation GDAL degrades to a LOCAL_CS, and the record of that
+                # belongs in the manifest rather than only in a docstring.
+                "crs_declared_as": crs_declared_as,
             },
             "grid": grid,
             "source": {
@@ -724,16 +795,6 @@ def fetch(
             (json.dumps(manifest(complete), indent=2, sort_keys=True) + "\n").encode("utf-8"),
         )
 
-    source_sha256 = sha256_of(candidates)
-    planned_names = {tile_name(tx, ty) for tx, ty in plan}
-    unplanned = sorted(
-        path.name for path in tile_dir.glob("*.tif") if path.name not in planned_names
-    )
-    if unplanned:
-        # Never deleted: this stage does not get to decide that a file the
-        # operator has is garbage. It is a shrunken plan, not a mistake.
-        print(f"on disk: {len(unplanned)} tiles this plan does not name, kept", file=sys.stderr)
-
     try:
         for index, (tx, ty) in enumerate(plan):
             path = tile_dir / tile_name(tx, ty)
@@ -757,6 +818,7 @@ def fetch(
                 stats = validate(data, bbox, tile_px)
                 write_atomically(path, data)
                 entries[(tx, ty)] = tile_entry(tx, ty, span, path, stats)
+                crs_declared_as = stats.crs_declared_as
                 fetched += 1
                 if fetched % MANIFEST_EVERY == 0:
                     save(complete=False)
@@ -788,24 +850,7 @@ def fetch(
     save(complete=complete)
 
     written = manifest(complete)
-    counts = written["counts"]
-    print(
-        f"tiles: {counts['tiles_present']}/{counts['tiles']} present, "
-        f"{fetched} fetched, {reused} reused, {counts['bytes_total'] / 1e9:.2f} GB",
-        file=sys.stderr,
-    )
-    print(
-        f"nodata: {counts['nodata_px']} of {counts['px_total']} px "
-        f"({100 * counts['nodata_px'] / max(counts['px_total'], 1):.1f}%), "
-        f"{counts['tiles_all_nodata']} tiles wholly uncovered",
-        file=sys.stderr,
-    )
-    if counts["zero_px"]:
-        print(
-            f"zero: {counts['zero_px']} px at exactly 0.0 — 0 m is not an elevation in Czechia, "
-            "so the noData parameter is not being applied. #8 must not sample these",
-            file=sys.stderr,
-        )
+    report(written, fetched, reused)
     if not complete:
         print(f"incomplete: no {OUTPUT_NAME} written — re-run to finish", file=sys.stderr)
         return 1

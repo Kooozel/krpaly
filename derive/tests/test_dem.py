@@ -593,6 +593,16 @@ def test_fetch_time_survives_the_verification_rerun(staged: Path) -> None:
     assert manifest_of(staged)["dem"]["fetch_wall_clock_s"] == second
 
 
+def test_records_which_transform_proj_chose(fetched: tuple[Path, Service]) -> None:
+    """A `Transformer` cannot describe itself, so the group is asked instead."""
+    out, _service = fetched
+    recorded = manifest_of(out)["grid"]["transform"]
+    assert recorded["operations_available"] >= 1
+    assert "Krovak" in recorded["operation"]
+    assert recorded["operation_accuracy_m"] is not None
+    assert recorded["proj_version"]
+
+
 def test_records_the_crs_the_windows_declare(fetched: tuple[Path, Service]) -> None:
     """#7: "the CRS as the files actually declare it" — not the one asked for."""
     out, _service = fetched

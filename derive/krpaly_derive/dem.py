@@ -56,9 +56,11 @@ from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
+import pyproj
 import rasterio
 import shapely
 from pyproj import Transformer
+from pyproj.transformer import TransformerGroup
 
 # This stage consumes #6's output, so the two facts it needs about that file —
 # how a forward row spells its direction, and how a checksum over it is taken —
@@ -221,6 +223,31 @@ def transformer() -> Transformer:
     latitude-first axis order and every tile lands in the Baltic.
     """
     return Transformer.from_crs(SOURCE_CRS, PROJECTED_CRS, always_xy=True)
+
+
+def transform_provenance() -> dict:
+    """Which WGS84 → S-JTSK operation PROJ will choose here, and how good it is.
+
+    A `Transformer` reports nothing about itself — `description`, `definition`
+    and `accuracy` are all the string "unavailable until proj_trans is called",
+    and stay that way after transforming, because PROJ defers the choice to
+    transform time. `TransformerGroup` is where the answer lives: it lists the
+    operations the installed PROJ can actually run, best first, and that list
+    changes with the datum grids present on the machine.
+
+    The spread between them is metres — the best available here is accurate to
+    6 m — which is comfortably inside the halo, so *coverage* is safe. But the
+    planned tile **set** can still differ by one tile between two machines, and
+    recording this is what makes that a manifest diff rather than a mystery.
+    """
+    group = TransformerGroup(SOURCE_CRS, PROJECTED_CRS, always_xy=True)
+    best = group.transformers[0] if group.transformers else None
+    return {
+        "proj_version": pyproj.proj_version_str,
+        "operation": best.description if best else None,
+        "operation_accuracy_m": best.accuracy if best else None,
+        "operations_available": len(group.transformers),
+    }
 
 
 def segments_in_metres(candidates: Path, to_metres: Transformer) -> tuple[np.ndarray, ...]:
@@ -560,23 +587,15 @@ def read_manifest(path: Path) -> dict:
     return prior if isinstance(prior, dict) else {}
 
 
-def grid_block(tile_px: int, halo_m: float, to_metres: Transformer) -> dict:
-    """Everything about the grid that changes the geometry of a tile on disk.
-
-    The transformer is recorded because `Transformer.from_crs` picks whichever
-    operation the installed PROJ has and they differ by about a metre — well
-    inside the halo, so coverage is safe, but the planned *set* can differ by a
-    tile between machines. Recorded, it shows up as a manifest diff rather than
-    as a mysterious extra download.
-    """
+def grid_block(tile_px: int, halo_m: float) -> dict:
+    """Everything about the grid that decides where a tile's edges fall."""
     return {
         "origin_x": GRID_ORIGIN[0],
         "origin_y": GRID_ORIGIN[1],
         "tile_px": tile_px,
         "tile_m": tile_span(tile_px),
         "halo_m": halo_m,
-        "transformer_description": to_metres.description,
-        "transformer_accuracy": to_metres.accuracy,
+        "transform": transform_provenance(),
     }
 
 
@@ -652,7 +671,6 @@ def fetch(
     started = time.monotonic()
     started_at = datetime.now(UTC).isoformat(timespec="seconds")
     span = tile_span(tile_px)
-    to_metres = transformer()
 
     plan = plan_tiles(candidates, tile_px, halo_m)
     if not plan:
@@ -678,7 +696,7 @@ def fetch(
 
     prior = read_manifest(manifest_path)
     prior_grid = prior.get("grid", {})
-    grid = grid_block(tile_px, halo_m, to_metres)
+    grid = grid_block(tile_px, halo_m)
     # The source's checksum is provenance rather than a gate: a changed
     # candidates file changes *which* tiles are wanted, and the ones already on
     # disk are still correct pixels. A changed grid is different: it changes

@@ -8,10 +8,13 @@
   "counts": {
     "candidates": 192286,
     "segments": 96143,
+    "segments_bridge": 4517,
+    "segments_covered": 205,
     "segments_degenerate": 0,
     "segments_dropped": 800719,
     "segments_missing_location": 0,
     "segments_outside_buffer": 800719,
+    "segments_tunnel": 121,
     "ways_cyclable": 623269,
     "ways_seen": 9594656
   },
@@ -25,11 +28,12 @@
     "writingprogram": "osmium/1.16.0"
   },
   "output": {
-    "bytes": 17148409,
+    "bytes": 17156598,
     "file": "candidates.parquet",
-    "sha256": "3057dbe1437191acefba68b00728796f59c11459b8ab87aebe4caf566f0b0285"
+    "sha256": "eacc40b65050f181dac939b421f79dee50350139dc2cd87471704343bfe205b1"
   },
   "way_filter": {
+    "structure": "structure/v1",
     "version": "cyclable/v1"
   }
 }

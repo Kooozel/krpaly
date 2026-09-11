@@ -24,7 +24,7 @@ meaning of.
 
 A square boundary relation — id `300`, version `42`, `type=boundary`, `admin_level=4`, spanning
 18,00–18,10 °E and 49,80–49,90 °N, which is inside Moravskoslezský kraj and therefore inside the
-domain of EPSG:5514, the projection the extractor buffers in — and ten ways lettered A to J.
+domain of EPSG:5514, the projection the extractor buffers in — and fourteen ways lettered A to N.
 `make_junctions_pbf.py` names each one and what it is there to prove;
 `../test_extract.py` asserts the segments they must produce.
 

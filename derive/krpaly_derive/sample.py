@@ -8,7 +8,7 @@ and the terrain read under each step bilinearly, so what comes out is
 `[distance_m, elevation_m, lat, lon]` — `detectClimbs`' argument verbatim, with
 distance taken as given rather than recomputed by the engine (#9).
 
-Three properties are the reason this stage exists as its own file on disk:
+Four properties are the reason this stage exists as its own file on disk:
 
 * **Nodata is reported, never absorbed.** A candidate any of whose samples
   touches nodata — or a pixel at exactly 0.0, which is never a Czech elevation
@@ -23,11 +23,15 @@ Three properties are the reason this stage exists as its own file on disk:
   through the middle of the kraj. Both directions go through EPSG:5239 alone.
 * **Bilinear, not nearest.** Nearest-neighbour on 2 m pixels is a staircase
   the detector reads as grade noise; on a plane bilinear is exact.
-
-**Bridges and tunnels are sampled as terrain.** DMR 5G is bare earth, so a
-viaduct samples the valley under it and a tunnel the hill over it — a
-fictional climb either way. That is #22, and it must land before #11 loads
-anything.
+* **Structures are read at their ends.** DMR 5G is bare earth, so read under
+  every sample a viaduct is the valley it spans and a tunnel the hill over it
+  — a fictional climb either way (#22). A candidate #6 marks as a bridge,
+  tunnel or covered is read at its two ends only, where it meets the ground,
+  and interpolated linearly by distance between them. #6 splits only within a
+  way and the tags are the way's, so no candidate is partly on one. Its
+  interior is never terrain, so it can be neither nodata nor a reason to drop;
+  an end on nodata still is. The deck's own vertical curve and camber are
+  flattened into a straight line — metres truer than a valley floor, not exact.
 
 It does not run the engine (#9), chain or dedupe candidates (#10), or load
 anything (#11).
@@ -88,6 +92,10 @@ METHOD = "bilinear"
 NODATA_RULE = (
     "a candidate any of whose samples has a nodata or 0.0 pixel among its four "
     "neighbours is dropped whole"
+)
+STRUCTURE_RULE = (
+    "a bridge, tunnel or covered candidate is read at its two endpoints only and "
+    "interpolated linearly by distance between them"
 )
 
 # GDAL keeps this many sources open behind a VRT. The default of 100 is far
@@ -266,6 +274,9 @@ def stage_signature(
         ("source", "dem_sha256"): dem_sha256,
         ("sampling", "step_m"): step_m,
         ("sampling", "method"): METHOD,
+        # The source's sha changes with the code that wrote it anyway; this is
+        # here so a change to the rule alone also re-samples.
+        ("sampling", "structure_rule"): STRUCTURE_RULE,
         ("transform", "code"): PINNED_OPERATION,
     }
 
@@ -304,6 +315,7 @@ def report(written: dict) -> None:
         f"uncovered, dropped — {counts['nodata_samples']} samples",
         file=sys.stderr,
     )
+    print(f"structures: {counts['structures']} kept, profiled between their ends", file=sys.stderr)
     if counts["degenerate"]:
         print(f"degenerate: {counts['degenerate']} with no length, dropped", file=sys.stderr)
     print(
@@ -347,8 +359,15 @@ def sample(
     # Every vertex of every candidate, both directions, in one vectorised call.
     # No row pairing is assumed: each direction is sampled on its own, which
     # costs a few million bilinear reads and nothing else.
-    table = pq.read_table(candidates, columns=["candidate_id", "geometry"])
+    # Refused by name rather than left to pyarrow's KeyError: read as all
+    # ground, a pre-#22 file would profile every viaduct as its valley.
+    if "structure" not in pq.read_schema(candidates).names:
+        raise SampleError(
+            f"{candidates} predates #22's structure column — re-run krpaly_derive.extract"
+        )
+    table = pq.read_table(candidates, columns=["candidate_id", "geometry", "structure"])
     ids = table.column("candidate_id").to_numpy()
+    on_structure = table.column("structure").is_valid().to_numpy()
     lines = shapely.from_wkb(table.column("geometry").to_numpy(zero_copy_only=False))
     coords = shapely.get_coordinates(lines)
     starts = np.concatenate(([0], np.cumsum(shapely.get_num_coordinates(lines))))
@@ -368,19 +387,44 @@ def sample(
             part.append(values)
     d, xs, ys = (np.concatenate(part) if part else np.empty(0) for part in parts)
 
+    offsets = np.concatenate(([0], np.cumsum(n_samples)))
+    sampled = n_samples > 0
+    # The candidate each sample belongs to, and each candidate's first and last
+    # sample. A degenerate candidate owns no samples, so its `first` and `last`
+    # are never indexed through `owner` — only through `[sampled]`.
+    owner = np.repeat(np.arange(len(ids)), n_samples)
+    first, last = offsets[:-1], offsets[1:] - 1
+
+    # Terrain is read under every sample of a ground candidate and under the
+    # two ends of a structure, and nowhere else.
+    read = ~on_structure[owner]
+    read[first[sampled]] = True
+    read[last[sampled]] = True
+
+    z = np.full(len(d), np.nan)
     pool = len(mosaic.get("tiles", [])) + POOL_HEADROOM
     with rasterio.Env(GDAL_MAX_DATASET_POOL_SIZE=pool), rasterio.open(dem) as src:
-        z = bilinear(src, xs, ys, mosaic["grid"]["tile_m"])
+        z[read] = bilinear(src, xs[read], ys[read], mosaic["grid"]["tile_m"])
 
-    # Per-candidate NaN counts by prefix sum: `np.add.reduceat` would misread
-    # the zero-length segments a degenerate candidate leaves.
-    offsets = np.concatenate(([0], np.cumsum(n_samples)))
-    nan_prefix = np.concatenate(([0], np.cumsum(np.isnan(z))))
+    # Per-candidate NaN counts by prefix sum, over the samples actually read:
+    # `np.add.reduceat` would misread the zero-length segments a degenerate
+    # candidate leaves. A structure reads two, so `whole` means both ends.
+    bad = np.isnan(z) & read
+    nan_prefix = np.concatenate(([0], np.cumsum(bad)))
     nan_per = nan_prefix[offsets[1:]] - nan_prefix[offsets[:-1]]
-    sampled = n_samples > 0
-    whole = sampled & (nan_per == n_samples)
+    n_read = np.where(on_structure, 2, n_samples) * sampled
+    whole = sampled & (nan_per == n_read)
     partial = sampled & (nan_per > 0) & ~whole
     kept = sampled & (nan_per == 0)
+
+    # The deck: a structure's interior, on the straight line between its ends.
+    # The ends keep the values they were read at, so both directions still
+    # share them bit for bit. A dropped structure interpolates to NaN here and
+    # is never written.
+    deck = ~read
+    at = owner[deck]
+    z0, z1 = z[first[at]], z[last[at]]
+    z[deck] = z0 + (z1 - z0) * d[deck] / d[last[at]]
 
     keep = np.repeat(kept, n_samples)
     lon, lat = pinned.transform(xs[keep], ys[keep], direction=TransformDirection.INVERSE)
@@ -407,7 +451,12 @@ def sample(
             "dem": dem.name,
             "dem_sha256": dem_sha256,
         },
-        "sampling": {"step_m": step_m, "method": METHOD, "nodata_rule": NODATA_RULE},
+        "sampling": {
+            "step_m": step_m,
+            "method": METHOD,
+            "nodata_rule": NODATA_RULE,
+            "structure_rule": STRUCTURE_RULE,
+        },
         "transform": {
             "code": PINNED_OPERATION,
             "operation": operation.description,
@@ -424,8 +473,10 @@ def sample(
             "degenerate": int((~sampled).sum()),
             "nodata_whole": int(whole.sum()),
             "nodata_partial": int(partial.sum()),
-            "nodata_samples": int(np.isnan(z).sum()),
+            # NaN pixels actually read: a structure's interior is never read.
+            "nodata_samples": int(bad.sum()),
             "samples": int(n_samples[kept].sum()),
+            "structures": int((kept & on_structure).sum()),
         },
         "output": {
             "file": OUTPUT_NAME,

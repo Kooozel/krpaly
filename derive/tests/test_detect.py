@@ -326,8 +326,8 @@ def write_stage(out: Path, roads: list[list[list[float]]]) -> None:
     for k, points in enumerate(roads):
         nodes = [10 * k + 1, 10 * k + 2]
         ends = [(points[0][3], points[0][2]), (points[-1][3], points[-1][2])]
-        rows.append(candidate(100 + k, nodes, ends, FORWARD))
-        rows.append(candidate(100 + k, nodes[::-1], ends[::-1], REVERSE))
+        rows.append(candidate(100 + k, nodes, ends, FORWARD, None))
+        rows.append(candidate(100 + k, nodes[::-1], ends[::-1], REVERSE, None))
         profiles.extend([points, reverse(points)])
     candidates = out / "candidates.parquet"
     write_parquet(rows, candidates)
@@ -421,7 +421,7 @@ def test_profiles_from_other_candidates_are_refused(tmp_path: Path) -> None:
     # different extraction would chain runs through junctions that are not
     # there.
     write_stage(tmp_path, [ramp(2000, 6)])
-    rows = [candidate(999, [1, 2], [(18.5, 49.5), (18.5, 49.6)], FORWARD)]
+    rows = [candidate(999, [1, 2], [(18.5, 49.5), (18.5, 49.6)], FORWARD, None)]
     write_parquet(rows, tmp_path / "candidates.parquet")
     with pytest.raises(SystemExit, match="candidates"):
         main(["--out", str(tmp_path)])

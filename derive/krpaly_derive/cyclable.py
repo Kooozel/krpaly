@@ -1,9 +1,14 @@
-"""Which OSM ways this database considers ridden.
+"""Which OSM ways this database considers ridden, and which of them are off the ground.
 
 Its own module because it is the one decision in the extraction stage that
 moves the headline climb count. It is referenced by name from
 `derive/INPUTS.md` § Cyclable ways, it is versioned so a derivation records
 which predicate produced it, and it is table-testable without a `.pbf`.
+
+The second decision — whether a ridden way is a bridge, a tunnel or covered —
+lives here for the same reasons. It does not change which ways are ridden, so
+it is versioned on its own rather than as a `cyclable` bump; it changes how
+#8 profiles them, because DMR 5G is bare earth and a deck is not.
 """
 
 from __future__ import annotations
@@ -81,3 +86,28 @@ def is_cyclable(tags: Mapping[str, str]) -> bool:
         return tags.get("bicycle") in GRANTED_BICYCLE
 
     return True
+
+
+# Bump on any change to `STRUCTURE_TAGS` or to what counts as one, and say so
+# in INPUTS.md § Structures. Separate from PREDICATE_VERSION because the ridden
+# set is unchanged: `cyclable/v2` is reserved for widening it, and a manifest
+# written before this key existed lacks it, which re-derives just as surely.
+STRUCTURE_VERSION = "structure/v1"
+
+# In precedence order. The combinations are real — a covered bridge is
+# `bridge=yes` + `covered=yes` — and all three are profiled the same way, so
+# the order decides only which count a candidate lands in.
+STRUCTURE_TAGS = ("bridge", "tunnel", "covered")
+
+
+def structure_of(tags: Mapping[str, str]) -> str | None:
+    """The structure a way is on, or None on the ground. See derive/INPUTS.md § Structures.
+
+    Any value but `no` is a structure — `viaduct`, `building_passage` and the
+    rest name kinds of one, and none of them is terrain.
+    """
+    for key in STRUCTURE_TAGS:
+        value = tags.get(key)
+        if value is not None and value != "no":
+            return key
+    return None

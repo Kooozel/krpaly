@@ -4,26 +4,28 @@
     "degenerate": 0,
     "kept": 190334,
     "nodata_partial": 414,
-    "nodata_samples": 60892,
+    "nodata_samples": 60742,
     "nodata_whole": 1538,
-    "samples": 3876536
+    "samples": 3876536,
+    "structures": 9622
   },
   "output": {
-    "bytes": 65523574,
+    "bytes": 65519673,
     "file": "profiles.parquet",
-    "sha256": "45bc69cac8f2ac8c04dc2574d1e5aa51a8cd8ef39630ab922db6fae64819b3ea"
+    "sha256": "560e37d278c80ea0ab39d4ebbbf28f6a1194b5913da9e2bb7be1f351b47cf9b6"
   },
   "sampling": {
     "method": "bilinear",
     "nodata_rule": "a candidate any of whose samples has a nodata or 0.0 pixel among its four neighbours is dropped whole",
-    "step_m": 10.0
+    "step_m": 10.0,
+    "structure_rule": "a bridge, tunnel or covered candidate is read at its two endpoints only and interpolated linearly by distance between them"
   },
   "source": {
-    "bytes": 17148409,
+    "bytes": 17156598,
     "dem": "dem.vrt",
     "dem_sha256": "da662e8b322747278fcaa0d5fedc89c4948fcf22a17fc1118fe3474c23ba5b32",
     "file": "candidates.parquet",
-    "sha256": "3057dbe1437191acefba68b00728796f59c11459b8ab87aebe4caf566f0b0285"
+    "sha256": "eacc40b65050f181dac939b421f79dee50350139dc2cd87471704343bfe205b1"
   },
   "transform": {
     "accuracy_m": 1.0,

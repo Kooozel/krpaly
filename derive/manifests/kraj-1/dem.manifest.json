@@ -39,9 +39,9 @@
     "vrt": "dem.vrt"
   },
   "source": {
-    "bytes": 17148409,
+    "bytes": 17156598,
     "file": "candidates.parquet",
-    "sha256": "3057dbe1437191acefba68b00728796f59c11459b8ab87aebe4caf566f0b0285"
+    "sha256": "eacc40b65050f181dac939b421f79dee50350139dc2cd87471704343bfe205b1"
   },
   "tiles": [
     {

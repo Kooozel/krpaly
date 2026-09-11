@@ -125,8 +125,8 @@ def write_candidates(path: Path) -> None:
     for index, line in enumerate(LINES_M):
         coords = to_degrees(line)
         node_ids = [10 * index + 1, 10 * index + 2]
-        rows.append(candidate(index, node_ids, coords, FORWARD))
-        rows.append(candidate(index, node_ids[::-1], coords[::-1], REVERSE))
+        rows.append(candidate(index, node_ids, coords, FORWARD, None))
+        rows.append(candidate(index, node_ids[::-1], coords[::-1], REVERSE, None))
     path.parent.mkdir(parents=True, exist_ok=True)
     write_parquet(rows, path)
 

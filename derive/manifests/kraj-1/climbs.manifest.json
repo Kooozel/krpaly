@@ -1,0 +1,75 @@
+{
+  "counts": {
+    "by_category": {
+      "1": 13,
+      "2": 158,
+      "3": 503,
+      "4": 2069,
+      "HC": 2,
+      "null": 20973,
+      "uncategorized": 4881
+    },
+    "climbs": 28599,
+    "runs": 190334,
+    "runs_with_climbs": 28162
+  },
+  "derivation": {
+    "engine_commit": "9fb96def4e9f9d9a3487c1c4701246ec1c42579d",
+    "engine_config_override": {},
+    "engine_version": "v0.1.0",
+    "scoring_model": "aso"
+  },
+  "engine": {
+    "effective_config": {
+      "CLIMB_CONTINUE_GRADE_PCT": 3.5,
+      "CLIMB_END_FLAT_M": 700,
+      "CLIMB_LEADIN_GRADE_PCT": 2.5,
+      "CLIMB_LEADIN_MAX_DISTANCE_M": 500,
+      "CLIMB_START_GRADE_PCT": 3.75,
+      "DESCENT_END_DISTANCE_M": 150,
+      "DESCENT_END_GRADE_PCT": -1,
+      "INTERPOLATE_MAX_GAP_M": 25,
+      "MAX_SUSTAINED_GRADIENT_WINDOW_M": 200,
+      "MERGE_COHERENT_ASCENT_RATIO": 0.85,
+      "MERGE_DESCENT_GAP_MAX_M": 760,
+      "MERGE_DESCENT_SCALE": 4,
+      "MERGE_GAP_GAIN_SCALE": 5.5,
+      "MERGE_GAP_MAX_BONUS_M": 4000,
+      "MERGE_MAX_GAP_M": 1200,
+      "MERGE_MAX_VALLEY_DROP_M": 20,
+      "MERGE_VALLEY_RATIO": 0.2,
+      "RESAMPLE_MIN_INTERVAL_M": 12,
+      "SMOOTH_GRAD_WINDOW_M": 200,
+      "SMOOTH_MID_GRADE_THRESHOLD": 0.03,
+      "SMOOTH_STEEP_GRADE_THRESHOLD": 0.08,
+      "SMOOTH_WINDOW_MAX_M": 250,
+      "SMOOTH_WINDOW_MID_M": 150,
+      "SMOOTH_WINDOW_MIN_M": 50,
+      "SNAP_LOOKAHEAD_MAX_M": 300,
+      "SPIKE_GRADIENT_THRESHOLD": 0.12,
+      "SPIKE_MAX_SEGMENT_M": 24,
+      "SPIKE_NEIGHBOR_THRESHOLD": 0.08,
+      "TRIM_END_GRADE_PCT": 2.5,
+      "TRIM_START_GRADE_PCT": 2.5,
+      "TRIM_STEEP_RATIO": 0.2,
+      "TRIM_TAIL_WINDOW_M": 200
+    },
+    "harness_sha256": "1a9547d85a8e8fe1f84a7ddd9da90e6f53c7aa917cd75e439707e812ec6c7a58",
+    "library_sha256": "98761701906ea424a07f1284abd2ba0cac80ae74a2222572be714173dea9a7d0",
+    "node": "v24.14.1",
+    "source_commit": "9fb96def4e9f9d9a3487c1c4701246ec1c42579d",
+    "tag": "v0.1.0",
+    "vendored_on": "2026-09-11"
+  },
+  "output": {
+    "bytes": 2712266,
+    "file": "climbs.parquet",
+    "sha256": "ef597dc72f6a787aa4157de4d11c1e446a34a88c5d6920c6519b7a587912cbf5"
+  },
+  "source": {
+    "candidates": "candidates.parquet",
+    "candidates_sha256": "3057dbe1437191acefba68b00728796f59c11459b8ab87aebe4caf566f0b0285",
+    "profiles": "profiles.parquet",
+    "profiles_sha256": "45bc69cac8f2ac8c04dc2574d1e5aa51a8cd8ef39630ab922db6fae64819b3ea"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "counts": {
+    "candidates": 192286,
+    "degenerate": 0,
+    "kept": 190334,
+    "nodata_partial": 414,
+    "nodata_samples": 60892,
+    "nodata_whole": 1538,
+    "samples": 3876536
+  },
+  "output": {
+    "bytes": 65523574,
+    "file": "profiles.parquet",
+    "sha256": "45bc69cac8f2ac8c04dc2574d1e5aa51a8cd8ef39630ab922db6fae64819b3ea"
+  },
+  "sampling": {
+    "method": "bilinear",
+    "nodata_rule": "a candidate any of whose samples has a nodata or 0.0 pixel among its four neighbours is dropped whole",
+    "step_m": 10.0
+  },
+  "source": {
+    "bytes": 17148409,
+    "dem": "dem.vrt",
+    "dem_sha256": "da662e8b322747278fcaa0d5fedc89c4948fcf22a17fc1118fe3474c23ba5b32",
+    "file": "candidates.parquet",
+    "sha256": "3057dbe1437191acefba68b00728796f59c11459b8ab87aebe4caf566f0b0285"
+  },
+  "transform": {
+    "accuracy_m": 1.0,
+    "code": 5239,
+    "dem_planned_with": {
+      "operation": "axis order change (2D) + Inverse of S-JTSK to WGS 84 (3) + Krovak East North (Greenwich)",
+      "operation_accuracy_m": 6.0,
+      "operations_available": 4,
+      "proj_version": "9.8.1"
+    },
+    "operation": "axis order change (2D) + Inverse of S-JTSK to WGS 84 (5) + Krovak East North (Greenwich)",
+    "proj_version": "9.8.1"
+  }
+}

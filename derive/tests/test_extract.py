@@ -242,6 +242,48 @@ def test_skips_completed_run(tmp_path: Path, capsys) -> None:
     assert output.stat().st_mtime_ns != before
 
 
+def test_the_record_is_the_manifest_minus_run(tmp_path: Path) -> None:
+    """#21's defect: the committed copy would have carried this machine's path."""
+    out, record = tmp_path / "kraj-1", tmp_path / "record"
+    assert run(out, "--record", str(record)) == 0
+
+    written = manifest(out)
+    text = (record / MANIFEST_NAME).read_text()
+    assert str(FIXTURE.resolve()) not in text
+    assert written["run"]["pbf_path"] == str(FIXTURE.resolve())
+    assert written["osm_snapshot"]["file"] == FIXTURE.name
+    assert "path" not in written["osm_snapshot"]
+    del written["run"]
+    assert json.loads(text) == written
+
+
+def test_a_skipped_run_restores_a_deleted_record(tmp_path: Path, capsys) -> None:
+    out, record = tmp_path / "kraj-1", tmp_path / "record"
+    assert run(out, "--record", str(record)) == 0
+    committed = (record / MANIFEST_NAME).read_bytes()
+    (record / MANIFEST_NAME).unlink()
+
+    assert run(out, "--record", str(record)) == 0
+    assert "already derived" in capsys.readouterr().err
+    assert (record / MANIFEST_NAME).read_bytes() == committed
+
+
+def test_a_manifest_in_the_old_shape_asks_for_force(tmp_path: Path) -> None:
+    """Written before #21, it carries the absolute path a record must not."""
+    out, record = tmp_path / "kraj-1", tmp_path / "record"
+    assert run(out, "--record", str(record)) == 0
+    old = manifest(out)
+    del old["osm_snapshot"]["file"]
+    old["osm_snapshot"]["path"] = old["run"].pop("pbf_path")
+    (out / MANIFEST_NAME).write_text(json.dumps(old))
+
+    with pytest.raises(SystemExit) as raised:
+        run(out, "--record", str(record))
+    assert "osm_snapshot.path" in str(raised.value)
+    assert "--force" in str(raised.value)
+    assert run(out, "--record", str(record), "--force") == 0
+
+
 def test_rederives_when_the_buffer_changes(tmp_path: Path) -> None:
     """The skip is keyed on everything that changes the output, not just the input file."""
     out = tmp_path / "out"

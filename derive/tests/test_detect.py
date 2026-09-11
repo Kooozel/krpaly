@@ -358,9 +358,12 @@ def test_the_stage_writes_climbs_and_a_derivation_ready_manifest(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     write_stage(tmp_path, [ramp(2000, 6), ramp(400, 4)])
-    assert main(["--out", str(tmp_path)]) == 0
+    record = tmp_path / "record"
+    assert main(["--out", str(tmp_path), "--record", str(record)]) == 0
 
     manifest = json.loads((tmp_path / MANIFEST_NAME).read_text())
+    committed = json.loads((record / MANIFEST_NAME).read_text())
+    assert committed == {block: value for block, value in manifest.items() if block != "run"}
     # Keyed as the derivation columns, so #11 copies this block rather than
     # mapping it.
     assert manifest["derivation"] == {

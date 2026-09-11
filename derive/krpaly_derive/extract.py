@@ -47,6 +47,7 @@ from shapely.ops import transform as reproject
 from shapely.prepared import PreparedGeometry, prep
 
 from krpaly_derive.cyclable import PREDICATE_VERSION, is_cyclable
+from krpaly_derive.record import RecordError, record_dir, write_record
 
 # Moravskoslezský kraj. A default rather than a constant because kraj-2 is
 # the same command with a different number — see derive/INPUTS.md § Kraj
@@ -480,6 +481,7 @@ def extract(
     buffer_m: float,
     index: str,
     force: bool,
+    record: Path | None = None,
 ) -> int:
     if not pbf.is_file():
         raise ExtractError(f"{pbf} is not a file — pass --pbf a Geofabrik .osm.pbf")
@@ -496,14 +498,17 @@ def extract(
     out.mkdir(parents=True, exist_ok=True)
     output_path = out / OUTPUT_NAME
     manifest_path = out / MANIFEST_NAME
+    record = record or record_dir(out)
 
     started = time.monotonic()
     started_at = datetime.now(UTC).isoformat(timespec="seconds")
 
     header = read_header(pbf)
     provenance = {
+        # The name rather than the path: this block is committed, and where the
+        # extract sits on this machine goes in `run`. The sha256 is the identity.
         "osm_snapshot": {
-            "path": str(pbf.resolve()),
+            "file": pbf.name,
             "bytes": pbf.stat().st_size,
             "sha256": sha256_of(pbf),
             **header,
@@ -513,6 +518,10 @@ def extract(
 
     signature = stage_signature(provenance["osm_snapshot"], boundary_relation, buffer_m)
     if not force and already_done(manifest_path, output_path, signature):
+        # Recorded from the prior manifest, so a no-op re-run still restores a
+        # deleted record rather than leaving the commit without one.
+        prior = json.loads(manifest_path.read_text())
+        write_record(prior, record, MANIFEST_NAME)
         print(
             f"{output_path} is already derived from this input — pass --force to redo",
             file=sys.stderr,
@@ -557,9 +566,11 @@ def extract(
         "run": {
             "started_at": started_at,
             "wall_clock_s": round(time.monotonic() - started, 3),
+            "pbf_path": str(pbf.resolve()),
         },
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    write_record(manifest, record, MANIFEST_NAME)
     return 0
 
 
@@ -587,6 +598,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force", action="store_true", help="re-derive even if the output is already current"
     )
+    parser.add_argument(
+        "--record",
+        type=Path,
+        default=None,
+        help="where the committed copy goes (default: derive/manifests/<name of --out>)",
+    )
     args = parser.parse_args(argv)
 
     # A missing file or a boundary that does not assemble is the operator's
@@ -600,8 +617,9 @@ def main(argv: list[str] | None = None) -> int:
             buffer_m=args.buffer_m,
             index=args.index,
             force=args.force,
+            record=args.record,
         )
-    except ExtractError as error:
+    except (ExtractError, RecordError) as error:
         raise SystemExit(f"extract: {error}") from error
 
 

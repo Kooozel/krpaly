@@ -49,9 +49,10 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from krpaly_derive.dem import read_manifest, write_atomically
+from krpaly_derive.dem import read_manifest
 from krpaly_derive.extract import OUTPUT_NAME as SOURCE_NAME
 from krpaly_derive.extract import already_done, sha256_of, write_table
+from krpaly_derive.record import RecordError, record_dir, write_atomically, write_record
 from krpaly_derive.sample import MANIFEST_NAME as PROFILES_MANIFEST
 from krpaly_derive.sample import OUTPUT_NAME as PROFILES_NAME
 
@@ -490,7 +491,13 @@ def report(written: dict) -> None:
 
 
 def detect_stage(
-    out: Path, profiles: Path, candidates: Path, override: dict, model: str, force: bool
+    out: Path,
+    profiles: Path,
+    candidates: Path,
+    override: dict,
+    model: str,
+    force: bool,
+    record: Path | None = None,
 ) -> int:
     if not profiles.is_file():
         raise DetectError(
@@ -505,6 +512,7 @@ def detect_stage(
     out.mkdir(parents=True, exist_ok=True)
     output_path = out / OUTPUT_NAME
     manifest_path = out / MANIFEST_NAME
+    record = record or record_dir(out)
 
     started = time.monotonic()
     started_at = datetime.now(UTC).isoformat(timespec="seconds")
@@ -516,6 +524,9 @@ def detect_stage(
         profiles_sha256, candidates_sha256, library_sha256, harness_sha256, override, model
     )
     if not force and already_done(manifest_path, output_path, signature):
+        # Recorded from the prior manifest, as extract does, so a no-op re-run
+        # still restores a deleted record.
+        write_record(read_manifest(manifest_path), record, MANIFEST_NAME)
         print(
             f"{output_path} is already detected from these inputs — pass --force to redo",
             file=sys.stderr,
@@ -576,6 +587,7 @@ def detect_stage(
     write_atomically(
         manifest_path, (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     )
+    write_record(manifest, record, MANIFEST_NAME)
     report(manifest)
     return 0
 
@@ -600,6 +612,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force", action="store_true", help="re-detect even if the output is already current"
     )
+    parser.add_argument(
+        "--record",
+        type=Path,
+        default=None,
+        help="where the committed copy goes (default: derive/manifests/<name of --out>)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -610,8 +628,9 @@ def main(argv: list[str] | None = None) -> int:
             override=ENGINE_CONFIG_OVERRIDE,
             model=SCORING_MODEL,
             force=args.force,
+            record=args.record,
         )
-    except DetectError as error:
+    except (DetectError, RecordError) as error:
         raise SystemExit(f"detect: {error}") from error
 
 

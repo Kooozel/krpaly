@@ -402,19 +402,25 @@ def test_retries_a_transient_failure(monkeypatch) -> None:
 # --- resume, re-entrancy and the manifest ------------------------------------
 
 
-def test_rerun_fetches_nothing(staged: Path) -> None:
+def test_rerun_fetches_nothing(staged: Path, tmp_path: Path) -> None:
+    record = tmp_path / "record"
     first = Service()
-    assert run(staged, first) == 0
+    assert run(staged, first, record=record) == 0
     before = manifest_of(staged)
+    committed = (record / MANIFEST_NAME).read_bytes()
 
     second = Service()
-    assert run(staged, second) == 0
+    assert run(staged, second, record=record) == 0
     after = manifest_of(staged)
 
     assert second.urls == []
     assert after["run"]["reused"] == len(PLANNED)
     del before["run"], after["run"]
     assert before == after
+    # The verification re-run #21 says would churn: the working copy's `run`
+    # moves, and the committed copy does not change by a byte.
+    assert (record / MANIFEST_NAME).read_bytes() == committed
+    assert json.loads(committed) == after
 
 
 def test_resume_refetches_only_what_is_missing(staged: Path) -> None:
@@ -474,6 +480,13 @@ def test_limit_leaves_the_run_incomplete(staged: Path) -> None:
     assert {entry["sha256"] for entry in partial["tiles"]} <= {
         entry["sha256"] for entry in finished["tiles"]
     }
+
+
+def test_an_incomplete_mosaic_is_never_recorded(staged: Path, tmp_path: Path) -> None:
+    """The record drops `run.complete`, so a record existing has to mean complete."""
+    record = tmp_path / "record"
+    assert run(staged, Service(), limit=2, record=record) == 1
+    assert not (record / MANIFEST_NAME).exists()
 
 
 def test_crash_leaves_a_readable_manifest(staged: Path) -> None:

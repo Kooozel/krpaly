@@ -66,8 +66,9 @@ that touches the database.
 migration runner, the vendored climb-engine build and the first four pipeline stages — OSM
 extraction to candidate polylines, DMR 5G acquisition, elevation sampling into engine-shaped
 profiles, and climb detection through a Node harness — but nothing after them: runs are still one
-candidate each, and there is no anchor dedupe and no loader; and `db/`, which has the schema, its
-migrations and `db/README.md`.** Everything below about `web/` is settled intent, not present code
+candidate each, and there is no anchor dedupe and no loader; `derive/manifests/`, the committed
+record of each stage's manifest for `kraj-1`; and `db/`, which has the schema, its migrations and
+`db/README.md`.** Everything below about `web/` is settled intent, not present code
 — it is written down because these are decisions that are expensive to reverse once rows exist, not
 because the code is there to read.
 
@@ -123,6 +124,13 @@ committed is the code, a **manifest** naming each input precisely enough to re-o
 timestamp and sha256, boundary relation id and version, DEM tile set and CRS as the files actually
 declare it), and — from #3 onward — one small fixture `.pbf` that makes the pipeline testable at
 all. A test suite with no committed input tests nothing.
+
+The committed manifest is each stage's manifest **minus `run`**, which the stage itself writes to
+`derive/manifests/<name of --out>/`. The copy under `--out` is resume state and stays gitignored.
+`run` is the one block allowed to differ between two runs over the same input, and the only place a
+machine path may appear — `write_record` refuses one anywhere else — so a re-run that changed
+nothing rewrites the same bytes and git sees no diff. `dem_manifest_sha256` hashes that committed
+`dem.manifest.json`.
 
 Heart-rate zones and anything else personal are never committed.
 

@@ -24,10 +24,11 @@ dependencies = [
     # minutes of pure Python, and counting nodata over a window is one call.
     "numpy>=2.1",
     # rasterio validates each arriving window against the grid it was asked
-    # for — a resampled response is still a valid GeoTIFF — and it is what #8
-    # samples the mosaic through. It lands here rather than in #8 because #7
-    # decides the local form, and a VRT that no test has opened is a decision
-    # made on paper. The wheel carries its own GDAL, so no system library.
+    # for — a resampled response is still a valid GeoTIFF — and it is what
+    # sample.py reads the mosaic through. It landed with #7 rather than #8
+    # because #7 decides the local form, and a VRT that no test has opened is a
+    # decision made on paper. The wheel carries its own GDAL, so no system
+    # library.
     "rasterio>=1.4",
 ]
 

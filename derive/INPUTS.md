@@ -96,27 +96,45 @@ of only in git history.
 
 Which ways the extraction rides is the one decision in #6 that moves the headline climb count, so
 it is versioned and recorded rather than left implicit in a filter expression. The predicate is
-`derive/krpaly_derive/cyclable.py`; its name is `cyclable/v1`, and every run writes that name into
-`candidates.manifest.json` → `way_filter.version`.
+`derive/krpaly_derive/cyclable.py`; its name is `cyclable/v2`, and every run writes that name into
+`candidates.manifest.json` → `way_filter.version`. The manifests under `derive/manifests/kraj-1/`
+were derived under `cyclable/v1`, and those under `derive/manifests/kraj-1-v2/` under v2; v1 itself
+is recoverable from git history, not from `main`'s current tree.
 
 | | `highway`, and the tags that qualify it |
 | --- | --- |
 | in | `motorway_link` `trunk`/`_link` `primary`/`_link` `secondary`/`_link` `tertiary`/`_link` `unclassified` `residential` `living_street` `road` `cycleway` |
-| in | `track` **only** where `tracktype` is `grade1` or `grade2` |
+| in | `service` **only** with no `service=*` subtype |
+| in | `track` where `tracktype` is `grade1` or `grade2`, **or** `surface` is paved — `asphalt` `chipseal` `concrete` `concrete:lanes` `concrete:plates` `paving_stones` |
 | out | `motorway`, and everything not named above — `path` `footway` `steps` `bridleway` `pedestrian` `corridor` `construction` `proposed` `raceway` `busway` `platform` among them |
-| out | `track` with no `tracktype`, or `grade3`–`grade5` |
+| out | `service` with any subtype — `driveway` `parking_aisle` `drive-through` `alley` among them |
+| out | `track` with neither a `grade1`/`grade2` `tracktype` nor a paved `surface` |
 | out | `access` in `private`/`no`, and `bicycle=no` |
-| override | `bicycle` in `yes`/`designated`/`permissive` beats an `access` exclusion, but never promotes a `highway` value that is out — a `path` signed for bicycles is still not a road climb |
+| override | `bicycle` in `yes`/`designated`/`permissive` beats an `access` exclusion, but never promotes a `highway` value that is out, *including a `service` subtype* — a `path` signed for bicycles is still not a road climb, and nor is a `service=driveway` |
+| note | `motor_vehicle` is not consulted: `motor_vehicle=no`/`private` on an in-road leaves it in, because a road closed to cars is still ridden |
 
 `motorway` is out and `motorway_link` is in on purpose: the motorway itself is not ridden, but a
 link is often the only cyclable connection between two roads that are.
 
+**Why plain `service` is in.** The Beskydy summit roads are asphalt forest roads mapped as plain
+`highway=service`, gated for cars by `access=permissive` or `motor_vehicle=no`/`private`. #24
+found Lysá hora's last 2.5 km, 10.5–13 km along the climb, on nothing else, so under v1 there was
+no route to the summit at all. The subtype is what tells such a road from the service noise:
+`driveway`, `parking_aisle`, `drive-through` and `alley` are ways nobody climbs, and they are
+exactly the ones mappers subtype.
+
 **Why tracks are mostly out**, recorded because it is re-litigable. krpaly is a road-climb database
 and this milestone's headline number is the climb count, so an untagged forest track — the modal
-`track` in the Beskydy — must not inflate it. `grade1` and `grade2` are the surfaced ones and are
-the whole of what is let in.
+`track` in the Beskydy — must not inflate it. `grade1` and `grade2` are the surfaced ones. A paved
+`surface` is let in too, whatever the `tracktype`, because `surface` is the fact `tracktype` only
+approximates; `sett` and `cobblestone` are paved but left out, since a forest track tagged that way
+is noise rather than a road climb. The exception does not rescue the untagged Bílý Kříž track #24
+names, which carries neither tag.
 
-Widening any of this is a `cyclable/v2` and a new derivation rather than an edit to an existing
+**What v1 was**, so the kraj-1 manifests stay readable: no `service` at all, and a `track` only on
+`grade1`/`grade2`, with `surface` never consulted. Everything else is as above.
+
+Widening any of this is the next version and a new derivation rather than an edit to an existing
 one, which is exactly the visibility wanted: two derivations that differ only by their predicate
 are two sets of rows, told apart by the manifest.
 
@@ -147,10 +165,10 @@ this. The straight line between the abutments is the deck, which flattens the de
 curve and camber: metres truer than a valley floor, and not exact. The ends are still terrain, so an
 end on nodata still drops the candidate.
 
-**A separate version, not `cyclable/v2`.** The ridden set is unchanged, and `cyclable/v2` is kept
-for widening it. A manifest written before this key existed lacks it, so extraction re-derives
-rather than reusing candidates that have no `structure` column — and `sample.py` refuses such a
-file outright.
+**A separate version, not a `cyclable` bump.** The ridden set is unchanged, and a `cyclable` bump
+is kept for widening it. A manifest written before this key existed lacks it, so extraction
+re-derives rather than reusing candidates that have no `structure` column — and `sample.py`
+refuses such a file outright.
 
 ## DEM source
 

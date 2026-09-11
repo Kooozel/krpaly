@@ -15,16 +15,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-# Bump on any change to the sets below, and say so in INPUTS.md: a widened
-# predicate is a different database, not a bigger one, and the manifest
-# records this string so two derivations that differ only here are told
-# apart. Rows derived under v1 stay v1.
-PREDICATE_VERSION = "cyclable/v1"
+# Bump on any change to the sets or the rules below, and say so in INPUTS.md:
+# a widened predicate is a different database, not a bigger one, and the
+# manifest records this string so two derivations that differ only here are
+# told apart. Rows derived under v1 stay v1 — the committed kraj-1 manifests
+# are the record of which predicate produced them.
+PREDICATE_VERSION = "cyclable/v2"
 
-# The `highway` values a road climb can be on. `motorway` is absent and
-# `motorway_link` is present on purpose: the motorway itself is not ridden,
-# but a link is often the only cyclable connection between two roads that
-# are.
+# The `highway` values a road climb can be on unconditionally. `motorway` is
+# absent and `motorway_link` is present on purpose: the motorway itself is not
+# ridden, but a link is often the only cyclable connection between two roads
+# that are. `track` and `service` are absent because each is admitted only
+# conditionally, in `is_cyclable`.
 RIDDEN_HIGHWAY = frozenset(
     {
         "motorway_link",
@@ -47,10 +49,24 @@ RIDDEN_HIGHWAY = frozenset(
 # krpaly is a road-climb database and the milestone's headline number is the
 # climb count, so an untagged forest track — the modal `track` in the
 # Beskydy — must not inflate it. grade1 and grade2 are the surfaced ones;
-# grade3 to grade5 and an absent `tracktype` are out. Widening this is a
-# `cyclable/v2` and a new derivation, which is exactly the visibility
-# wanted.
+# grade3 to grade5 and an absent `tracktype` are out unless `surface` says
+# the track is paved.
 RIDDEN_TRACKTYPE = frozenset({"grade1", "grade2"})
+
+# `surface` is the paved-ness fact `tracktype` only approximates, so a track
+# on one of these is in whatever its tracktype. `sett` and `cobblestone` are
+# paved too and left out: a forest track tagged that way is noise rather than
+# a road climb.
+PAVED_SURFACE = frozenset(
+    {
+        "asphalt",
+        "chipseal",
+        "concrete",
+        "concrete:lanes",
+        "concrete:plates",
+        "paving_stones",
+    }
+)
 
 # Legal exclusions. These are about permission rather than surface, so a
 # `bicycle` tag that grants permission overrides them.
@@ -65,16 +81,27 @@ def is_cyclable(tags: Mapping[str, str]) -> bool:
     """Ways this database considers ridden. See derive/INPUTS.md § Cyclable ways.
 
     A `bicycle` grant reopens a way an `access` value closed, but it never
-    promotes a `highway` value that is out of the list — a `path` signed for
-    bicycles is still not a road climb, and letting it in is what a
-    `cyclable/v2` would be for.
+    promotes a `highway` value that is out — a `path` signed for bicycles is
+    still not a road climb, and neither is a `service=driveway`. `service`
+    gets in on its own terms, not through a grant. `motor_vehicle` is
+    deliberately not consulted: a road closed to cars is still ridden.
     """
     highway = tags.get("highway")
     if highway is None:
         return False
 
     if highway == "track":
-        if tags.get("tracktype") not in RIDDEN_TRACKTYPE:
+        if (
+            tags.get("tracktype") not in RIDDEN_TRACKTYPE
+            and tags.get("surface") not in PAVED_SURFACE
+        ):
+            return False
+    elif highway == "service":
+        # Plain `service` is how the Beskydy summit roads are mapped — Lysá
+        # hora's asphalt (181510545, 54276079 and the rest in #24), gated by
+        # `access=permissive` or `motor_vehicle`. Any subtype — `driveway`,
+        # `parking_aisle` and the rest — is noise nobody climbs.
+        if "service" in tags:
             return False
     elif highway not in RIDDEN_HIGHWAY:
         return False
@@ -90,7 +117,7 @@ def is_cyclable(tags: Mapping[str, str]) -> bool:
 
 # Bump on any change to `STRUCTURE_TAGS` or to what counts as one, and say so
 # in INPUTS.md § Structures. Separate from PREDICATE_VERSION because the ridden
-# set is unchanged: `cyclable/v2` is reserved for widening it, and a manifest
+# set is unchanged: a `cyclable` bump is reserved for widening it, and a manifest
 # written before this key existed lacks it, which re-derives just as surely.
 STRUCTURE_VERSION = "structure/v1"
 

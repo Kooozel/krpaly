@@ -106,12 +106,42 @@ def manifest(out: Path) -> dict:
         ({"highway": "path"}, False),
         ({"highway": "path", "bicycle": "designated"}, False),
         ({"highway": "footway"}, False),
-        # Tracks: surfaced in, everything else out, untagged out.
+        # Tracks: grade1 and grade2 in, the other grades out, untagged out...
         ({"highway": "track", "tracktype": "grade1"}, True),
         ({"highway": "track", "tracktype": "grade2"}, True),
         ({"highway": "track", "tracktype": "grade3"}, False),
         ({"highway": "track", "tracktype": "grade4"}, False),
         ({"highway": "track"}, False),
+        # ...unless `surface` says it is paved, whatever the tracktype. A
+        # tracktype still suffices on its own.
+        ({"highway": "track", "surface": "asphalt"}, True),
+        ({"highway": "track", "surface": "concrete"}, True),
+        ({"highway": "track", "tracktype": "grade4", "surface": "asphalt"}, True),
+        ({"highway": "track", "tracktype": "grade1", "surface": "gravel"}, True),
+        ({"highway": "track", "surface": "gravel"}, False),
+        ({"highway": "track", "tracktype": "grade3", "surface": "ground"}, False),
+        # Plain service is in: the Beskydy summit roads, gated for cars but
+        # not for bicycles. These are the Lysá hora tag sets from #24.
+        ({"highway": "service"}, True),
+        ({"highway": "service", "access": "permissive", "surface": "asphalt"}, True),
+        ({"highway": "service", "motor_vehicle": "no", "surface": "asphalt"}, True),
+        ({"highway": "service", "motor_vehicle": "private", "surface": "asphalt"}, True),
+        (
+            {"highway": "service", "access": "permissive", "bicycle": "yes", "surface": "asphalt"},
+            True,
+        ),
+        # ...a service subtype is not, and a bicycle grant does not promote it.
+        ({"highway": "service", "service": "driveway"}, False),
+        ({"highway": "service", "service": "parking_aisle"}, False),
+        ({"highway": "service", "service": "drive-through"}, False),
+        ({"highway": "service", "service": "alley"}, False),
+        ({"highway": "service", "service": "driveway", "bicycle": "designated"}, False),
+        # Access applies to service as to any other in-road.
+        ({"highway": "service", "access": "private"}, False),
+        ({"highway": "service", "access": "private", "bicycle": "yes"}, True),
+        ({"highway": "service", "bicycle": "no"}, False),
+        # motor_vehicle is not consulted: a road closed to cars is still ridden.
+        ({"highway": "residential", "motor_vehicle": "no"}, True),
         # Access, and the grant that overrides it — in one direction only.
         ({"highway": "residential", "access": "private"}, False),
         ({"highway": "residential", "access": "no"}, False),

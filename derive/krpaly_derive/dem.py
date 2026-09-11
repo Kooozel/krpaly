@@ -221,6 +221,11 @@ def transformer() -> Transformer:
 
     `always_xy` because without it pyproj honours EPSG:4326's declared
     latitude-first axis order and every tile lands in the Baltic.
+
+    This lets PROJ choose its operation per point, which is fine for planning
+    — the halo absorbs the metres between operations — and wrong for
+    sampling. `sample.py` pins one operation instead; see derive/INPUTS.md
+    § The transform #8 samples through.
     """
     return Transformer.from_crs(SOURCE_CRS, PROJECTED_CRS, always_xy=True)
 

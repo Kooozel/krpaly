@@ -236,6 +236,25 @@ point is 115 m (Hřensko), and Moravskoslezský's is about 195 m (Bohumín), so 
 0.0 is nodata regardless of how it arrived. Count them per window and decide explicitly, per
 `CLAUDE.md`, whether such candidates are dropped or interpolated across.
 
+#8 settles it: **dropped whole, counted by reason** (`nodata_whole`, `nodata_partial`), so a hole
+never becomes a sea-level climb and the geometry never drifts off its start and end nodes.
+
+### The transform #8 samples through
+
+The mosaic is EPSG:5514 and #6's candidates are WGS84, and PROJ 9.8.1 offers four operations
+between the two here: S-JTSK to WGS 84 (1), (3), (4) and (5). `Transformer.from_crs` chooses among
+them **per point**. At 18.5 E 49.55 N it uses (4), Slovakia's, whose area of use ends at 49.61 N,
+inside Moravskoslezský. North of that line it uses a Czech one. The operations disagree by up to
+~2.5 m, so an unpinned transform puts a metre-scale step through the middle of the kraj.
+
+`sample.py` therefore pins **EPSG:5239**, "S-JTSK to WGS 84 (5)": Czechia, 1 m, a seven-parameter
+Helmert with no grid, so it gives the same answer on every machine. It is selected by the EPSG id
+of the operation's datum step, never by searching the operation's JSON for "5239": that string also
+occurs inside (1), EPSG:1623. Both directions are the one pipeline run forward and inverse, and
+they round-trip to ~1e-8° (~1 mm), not to the bit, because PROJ's inverse Helmert is approximate.
+#7 planned its tiles with PROJ's own choice rather than the pin. Its 32 m halo absorbs the
+difference, and `profiles.manifest.json` records both.
+
 ### Volume
 
 At a 2 m grid and F32 the arithmetic is clean: one sample per 4 m², four bytes each — **1 byte per

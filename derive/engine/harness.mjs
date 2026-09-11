@@ -78,7 +78,7 @@ function readHeader(header) {
 // `segments` is the bulk of a climb and Python needs only where it starts and
 // ends along the input: the engine reports no input indices, so the two
 // distances are the position.
-function project(climb) {
+function summarise(climb) {
   return {
     distance: climb.distance,
     elevation: climb.elevation,
@@ -123,5 +123,5 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
   // score() maps the result's climbs to scored copies, and a climb that clears
   // no threshold comes back with difficulty and category null — kept.
   const climbs = score(detectClimbs(message.points, { config: header.config }), header.model);
-  reply({ id: message.id, climbs: climbs.map(project) });
+  reply({ id: message.id, climbs: climbs.map(summarise) });
 }

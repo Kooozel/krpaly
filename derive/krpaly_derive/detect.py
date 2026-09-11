@@ -43,7 +43,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import IO, NoReturn
 
 import numpy as np
 import pyarrow as pa
@@ -88,6 +88,10 @@ VERSION_KEYS = ("tag", "source_commit", "vendored_on")
 # the fields have colons too, but never after a single word at line start.
 VERSION_LINE = re.compile(r"^([a-z_]+):\s+(.*?)\s*$")
 SHA = re.compile(r"[0-9a-f]{40}")
+
+# How long a harness whose stdin has closed gets to exit before it is killed.
+# A healthy one finishes the line it is on and leaves at once.
+CLOSE_TIMEOUT_S = 10
 
 SCHEMA = pa.schema(
     [
@@ -283,6 +287,7 @@ class Harness:
         self.effective_config: dict = {}
         self.node = ""
         self._process: subprocess.Popen[str] | None = None
+        self._errors: IO[str] | None = None
         self._stderr: str | None = None
 
     def __enter__(self) -> Harness:
@@ -296,12 +301,18 @@ class Harness:
                 text=True,
                 encoding="utf-8",
             )
-        except FileNotFoundError as error:
+        except OSError as error:
             errors.close()
-            raise DetectError("node is not on PATH — the engine stage needs Node ≥20") from error
+            if isinstance(error, FileNotFoundError):
+                raise DetectError(
+                    "node is not on PATH — the engine stage needs Node ≥20"
+                ) from error
+            raise DetectError(f"node could not be started: {error}") from error
         self._errors = errors
         try:
-            engine = self._exchange({"config": self.override, "model": self.model})["engine"]
+            engine = self._exchange({"config": self.override, "model": self.model}).get("engine")
+            if not isinstance(engine, dict) or not {"effective_config", "node"} <= engine.keys():
+                self._fail(f"the harness answered the header with {engine!r}, not its engine block")
         except BaseException:
             self._close()
             raise
@@ -320,13 +331,12 @@ class Harness:
     def detect(self, run_id: int, points: list[list[float]]) -> list[dict]:
         """The run's climbs, scored — possibly none, which is still an answer."""
         reply = self._exchange({"id": run_id, "points": points})
-        if reply.get("id") != run_id:
-            raise DetectError(
-                f"asked about run {run_id}, the harness answered about run {reply.get('id')}"
-            )
+        if reply.get("id") != run_id or not isinstance(reply.get("climbs"), list):
+            self._fail(f"asked about run {run_id}, the harness answered {json.dumps(reply)[:120]}")
         return reply["climbs"]
 
     def _exchange(self, message: dict) -> dict:
+        """One line out, one line back, and the line back is at least a JSON object."""
         process = self._process
         try:
             process.stdin.write(json.dumps(message, allow_nan=False) + "\n")
@@ -336,7 +346,13 @@ class Harness:
         line = process.stdout.readline()
         if not line:
             self._fail("the harness closed its output without answering")
-        return json.loads(line)
+        try:
+            reply = json.loads(line)
+        except json.JSONDecodeError:
+            self._fail(f"the harness answered with a line that is not JSON: {line[:80]!r}")
+        if not isinstance(reply, dict):
+            self._fail(f"the harness answered with {line[:80]!r}, not a JSON object")
+        return reply
 
     def _fail(self, what: str) -> NoReturn:
         stderr = self._close()
@@ -352,7 +368,13 @@ class Harness:
             with contextlib.suppress(BrokenPipeError):
                 process.stdin.close()
             process.stdout.close()
-            process.wait()
+            try:
+                process.wait(timeout=CLOSE_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                # Its stdin is closed, so a harness still running is stuck
+                # inside the engine; nothing it could still say is wanted.
+                process.kill()
+                process.wait()
             self._errors.seek(0)
             self._stderr = self._errors.read()
             self._errors.close()

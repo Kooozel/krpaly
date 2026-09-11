@@ -67,9 +67,9 @@ migration runner, the vendored climb-engine build and the first four pipeline st
 extraction to candidate polylines, DMR 5G acquisition, elevation sampling into engine-shaped
 profiles, and climb detection through a Node harness — but nothing after them: runs are still one
 candidate each, and there is no anchor dedupe and no loader; and `db/`, which has the schema, its
-migrations and `db/README.md`.** Everything
-below about `web/` is settled intent, not present code — it is written down because these are
-decisions that are expensive to reverse once rows exist, not because the code is there to read.
+migrations and `db/README.md`.** Everything below about `web/` is settled intent, not present code
+— it is written down because these are decisions that are expensive to reverse once rows exist, not
+because the code is there to read.
 
 ## Constraints that bind work before it is written
 

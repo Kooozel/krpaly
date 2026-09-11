@@ -272,6 +272,47 @@ def test_a_valid_override_is_what_the_engine_runs_with() -> None:
         assert harness.effective_config["CLIMB_START_GRADE_PCT"] == 3.75
 
 
+def fake_harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
+    """A stand-in for harness.mjs that misbehaves in one named way."""
+    fake = tmp_path / "fake.mjs"
+    fake.write_text(source)
+    monkeypatch.setattr(detect, "HARNESS", fake)
+
+
+@REQUIRES_NODE
+def test_a_reply_that_is_not_json_is_a_one_line_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A DetectError, not a JSONDecodeError: main() turns only the first into
+    # one line on stderr.
+    fake_harness(
+        tmp_path, monkeypatch, 'process.stdout.write("not json\\n");\nprocess.stdin.resume();\n'
+    )
+    with pytest.raises(DetectError, match="not JSON"), Harness({}, "aso"):
+        pass
+
+
+@REQUIRES_NODE
+def test_a_reply_about_another_run_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Lockstep is what makes an out-of-order reply detectable at all.
+    fake_harness(
+        tmp_path,
+        monkeypatch,
+        'import { createInterface } from "node:readline";\n'
+        "let first = true;\n"
+        "for await (const line of createInterface({ input: process.stdin })) {\n"
+        "  process.stdout.write(first\n"
+        '    ? \'{"engine": {"effective_config": {}, "node": "fake"}}\\n\'\n'
+        '    : \'{"id": 99, "climbs": []}\\n\');\n'
+        "  first = false;\n"
+        "}\n",
+    )
+    with pytest.raises(DetectError, match='"id": 99'), Harness({}, "aso") as harness:
+        harness.detect(0, ramp(2000, 6))
+
+
 # --- the stage ---------------------------------------------------------------
 
 

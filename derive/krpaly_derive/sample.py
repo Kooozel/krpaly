@@ -39,7 +39,6 @@ import argparse
 import functools
 import json
 import math
-import os
 import sys
 import time
 from datetime import UTC, datetime
@@ -69,9 +68,9 @@ from krpaly_derive.dem import (
     write_atomically,
 )
 from krpaly_derive.dem import OUTPUT_NAME as DEM_NAME
-from krpaly_derive.extract import ROW_GROUP_SIZE, already_done, sha256_of
+from krpaly_derive.extract import OUTPUT_NAME as SOURCE_NAME
+from krpaly_derive.extract import already_done, sha256_of, write_table
 
-SOURCE_NAME = "candidates.parquet"
 OUTPUT_NAME = "profiles.parquet"
 MANIFEST_NAME = "profiles.manifest.json"
 
@@ -117,7 +116,7 @@ class SampleError(Exception):
     """An input this stage cannot sample, said in one line."""
 
 
-def uses_operation(candidate: Transformer, code: int) -> bool:
+def uses_operation(operation: Transformer, code: int) -> bool:
     """Whether one of an operation's steps *is* EPSG:`code`, by its id.
 
     The code alone, because the authority reads `INVERSE(DERIVED_FROM(EPSG))`:
@@ -126,7 +125,7 @@ def uses_operation(candidate: Transformer, code: int) -> bool:
     """
     return any(
         (step.to_json_dict().get("id") or {}).get("code") == code
-        for step in candidate.operations or ()
+        for step in operation.operations or ()
     )
 
 
@@ -139,9 +138,9 @@ def pinned_operation() -> Transformer:
     string — and the manifest records its name and accuracy.
     """
     group = TransformerGroup(SOURCE_CRS, PROJECTED_CRS, always_xy=True)
-    for candidate in group.transformers:
-        if uses_operation(candidate, PINNED_OPERATION):
-            return candidate
+    for operation in group.transformers:
+        if uses_operation(operation, PINNED_OPERATION):
+            return operation
     raise SampleError(
         f"EPSG:{PINNED_OPERATION} is not among the {len(group.transformers)} WGS84 → S-JTSK "
         f"operations PROJ {pyproj.proj_version_str} offers here — the pin cannot be honoured"
@@ -256,13 +255,6 @@ def read_padded(src: DatasetReader, col_off: int, row_off: int, size: int) -> np
 def list_column(offsets: np.ndarray, values: np.ndarray, kind: pa.DataType) -> pa.ListArray:
     """A ragged column from one flat array, without a Python list per row."""
     return pa.ListArray.from_arrays(pa.array(offsets, pa.int32()), pa.array(values, kind))
-
-
-def write_parquet(table: pa.Table, path: Path) -> None:
-    """Atomically and in a fixed shape, as #6 does, so the same inputs give the same bytes."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    pq.write_table(table, tmp, compression="zstd", row_group_size=ROW_GROUP_SIZE, version="2.6")
-    os.replace(tmp, path)
 
 
 def stage_signature(
@@ -398,7 +390,7 @@ def sample(out: Path, candidates: Path, dem: Path, step_m: float, force: bool) -
         },
         schema=SCHEMA,
     )
-    write_parquet(profiles, output_path)
+    write_table(profiles, output_path)
 
     operation = pinned_operation()
     manifest = {

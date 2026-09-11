@@ -41,6 +41,7 @@ from krpaly_derive.sample import (
     SampleError,
     bilinear,
     main,
+    pinned_operation,
     pinned_transformer,
     resample,
     sample,
@@ -350,7 +351,9 @@ def test_profiles_are_engine_tuples_on_the_plane(sampled) -> None:
         assert row["n_samples"] == len(d) == len(row["elevation_m"]) == len(row["lat"])
         assert d[0] == 0.0
         assert np.all(np.diff(d) > 0) and np.all(np.diff(d) <= STEP_M)
-        assert abs(d[-1] - length) < 1e-2
+        # Not to the bit: the line went through #6's lon/lat and back, and
+        # the pin round-trips to ~1 mm at each end.
+        assert abs(d[-1] - length) < 5e-3
 
         # The ends are the OSM nodes, which is where the anchor is.
         (first_lon, first_lat), (last_lon, last_lat) = to_degrees([line[0], line[-1]])
@@ -361,6 +364,28 @@ def test_profiles_are_engine_tuples_on_the_plane(sampled) -> None:
         assert np.max(np.abs(np.array(row["elevation_m"]) - plane(xs, ys))) < 1e-3
 
     assert profiles[ids["short"][0]]["n_samples"] == 2
+
+
+def test_rows_keep_the_order_of_the_candidates(sampled) -> None:
+    """Row order is `candidates.parquet`'s, which is part of "same inputs, same bytes"."""
+    out, _ids = sampled
+    written = pq.read_table(out / OUTPUT_NAME).column("candidate_id").to_pylist()
+    # plane, seam and short are the first three lines, both ways each.
+    assert written == [0, 1, 2, 3, 4, 5]
+
+
+def test_refuses_a_proj_without_the_pinned_operation(monkeypatch) -> None:
+    """A PROJ that lacks EPSG:5239 is refused, not quietly handed its own per-point choice."""
+    pinned_operation.cache_clear()
+    pinned_transformer.cache_clear()
+    monkeypatch.setattr("krpaly_derive.sample.PINNED_OPERATION", 999999)
+    try:
+        with pytest.raises(SampleError) as raised:
+            pinned_transformer()
+        assert "EPSG:999999" in str(raised.value)
+    finally:
+        pinned_operation.cache_clear()
+        pinned_transformer.cache_clear()
 
 
 def test_both_directions_are_one_profile_mirrored(sampled) -> None:

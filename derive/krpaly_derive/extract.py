@@ -404,17 +404,24 @@ def emit_ways(
 
 
 def write_parquet(rows: list[dict], path: Path) -> None:
-    """Write the table, atomically, in a fixed shape.
-
-    Through a temporary file and `os.replace` so an interrupted run leaves no
-    half file for #8 to read: the next stage checks for the output's
-    existence, not its integrity.
-    """
+    """Write the candidates, with `candidate_id` as the emission index and #6's geo metadata."""
     columns = {name: [row[name] for row in rows] for name in SCHEMA.names if name != "candidate_id"}
     columns["candidate_id"] = list(range(len(rows)))
     table = pa.table({name: columns[name] for name in SCHEMA.names}, schema=SCHEMA)
     table = table.replace_schema_metadata({"geo": json.dumps(GEO_METADATA, sort_keys=True)})
+    write_table(table, path)
 
+
+def write_table(table: pa.Table, path: Path) -> None:
+    """Any stage's Parquet, atomically and in a fixed shape.
+
+    Through a temporary file and `os.replace` so an interrupted run leaves no
+    half file for the next stage to read: it checks for the output's
+    existence, not its integrity. The codec, row-group size and format version
+    are fixed so the same rows produce the same bytes — "delete the output and
+    re-run produces the identical file" is a done-when of #6 and of #8, and
+    one function is what keeps the two saying the same thing.
+    """
     tmp = path.with_suffix(path.suffix + ".tmp")
     pq.write_table(
         table,

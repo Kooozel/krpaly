@@ -147,7 +147,8 @@ The derivation's real inputs are large and reproducible, so `data/`, `*.pbf`,
 One exception, and it is what makes the pipeline testable at all: a **small
 committed fixture `.pbf`**, one okres or less, cut alongside the first
 extraction code rather than before it. A test suite with no committed input
-tests nothing.
+tests nothing. The other exception is each stage's manifest minus `run`, which
+the stage itself writes to the tracked `derive/manifests/<name of --out>/`.
 
 Every committed fixture carries a `README.md` beside it saying where its bytes
 came from. A fixture *cut* from an extract is OSM data redistributed in this

@@ -10,8 +10,8 @@ Almost every value below was read back from the source rather than copied from a
 the [Re-verify](#re-verify) block at the end is the set of commands that read them again — all eight
 of them run clean as written. The handful that a machine-readable source does not carry are marked
 where they appear. A few values a document cannot hold — they need the whole file — and those name
-the run's own manifest instead: #6 writes `candidates.manifest.json`, #7 the DEM manifest beside
-it.
+the run's own manifest instead: #6 writes `candidates.manifest.json`, #7 `dem.manifest.json`, and
+each is committed, minus its `run` block, at `derive/manifests/<name of --out>/`.
 
 Scope: this names inputs. The `derivation` table is #5, the OSM extraction is #6, the DEM fetcher
 and its manifest are #7.
@@ -317,7 +317,9 @@ engine_config_override                                                 (from #9)
 `boundary_assignment` holds `summit`, so a later change of policy is a visible change of data.
 `dem_nodata_value` holds `-9999` and exists because a row derived before that parameter was passed
 is not comparable to one derived after. Per-window checksums stay in #7's committed manifest; the
-row carries `dem_manifest_sha256` and points at it.
+row carries `dem_manifest_sha256`, the sha256 of the committed
+`derive/manifests/<run>/dem.manifest.json` — the manifest minus `run`, so a verification re-run
+does not move it.
 
 ## Engine build
 

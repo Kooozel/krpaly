@@ -42,7 +42,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import re
 import sys
 import time
@@ -67,6 +66,7 @@ from pyproj.transformer import TransformerGroup
 # are read from the module that writes it rather than said again here. A copy
 # of either is a place for the two stages to drift apart.
 from krpaly_derive.extract import FORWARD, sha256_of
+from krpaly_derive.record import RecordError, record_dir, write_atomically, write_record
 
 # The export route, and the only one available: the service's capabilities are
 # `Catalog,Mensuration,Image,Metadata` — there is no `Download` operation, and
@@ -550,18 +550,6 @@ def build_vrt(entries: list[dict], tile_px: int, path: Path) -> None:
     write_atomically(path, xml.encode("utf-8"))
 
 
-def write_atomically(path: Path, data: bytes) -> None:
-    """Through a temporary file and `os.replace`, as `write_parquet` does.
-
-    An interrupted transfer must leave nothing half-written: #8 checks for a
-    tile's existence, not its integrity, and a truncated manifest would mean no
-    checksums for anything and a re-fetch of the whole mosaic.
-    """
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, path)
-
-
 def tile_entry(tx: int, ty: int, span: int, path: Path, stats: WindowStats) -> dict:
     return {
         "tx": tx,
@@ -666,6 +654,7 @@ def fetch(
     dry_run: bool,
     force: bool,
     window_fetcher: Callable[[str, float, int], bytes] | None = None,
+    record: Path | None = None,
 ) -> int:
     # Resolved here rather than as a default argument, which would bind at
     # import time and leave `main` — and therefore every argparse default —
@@ -812,11 +801,15 @@ def fetch(
             },
         }
 
-    def save(complete: bool) -> None:
+    def save(complete: bool) -> dict:
+        # Returned so the record and the report are the dict that was written:
+        # `manifest()` reads the clock, and a second call is a second manifest.
+        written = manifest(complete)
         write_atomically(
             manifest_path,
-            (json.dumps(manifest(complete), indent=2, sort_keys=True) + "\n").encode("utf-8"),
+            (json.dumps(written, indent=2, sort_keys=True) + "\n").encode("utf-8"),
         )
+        return written
 
     try:
         for index, (tx, ty) in enumerate(plan):
@@ -870,9 +863,13 @@ def fetch(
     complete = len(ordered) == len(plan)
     if complete:
         build_vrt(ordered, tile_px, vrt_path)
-    save(complete=complete)
-
-    written = manifest(complete)
+    written = save(complete=complete)
+    # Only a complete mosaic is recorded. The record drops `run`, and with it
+    # `run.complete`, the one field that marks a mosaic as partial — so a record
+    # existing has to mean complete. An incomplete run after a complete one
+    # leaves that record alone, and it still describes the last whole mosaic.
+    if complete:
+        write_record(written, record or record_dir(out), MANIFEST_NAME)
     report(written, fetched, reused)
     if not complete:
         print(f"incomplete: no {OUTPUT_NAME} written — re-run to finish", file=sys.stderr)
@@ -915,6 +912,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force", action="store_true", help="re-fetch every planned tile, and accept a new grid"
     )
+    parser.add_argument(
+        "--record",
+        type=Path,
+        default=None,
+        help="where the committed copy goes (default: derive/manifests/<name of --out>)",
+    )
     args = parser.parse_args(argv)
 
     # A mistyped path or a window that came back on the wrong grid is the
@@ -930,8 +933,9 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             dry_run=args.dry_run,
             force=args.force,
+            record=args.record,
         )
-    except DemError as error:
+    except (DemError, RecordError) as error:
         raise SystemExit(f"dem: {error}") from error
 
 

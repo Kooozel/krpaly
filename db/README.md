@@ -113,7 +113,7 @@ and queryable, rather than buried in JSON.
 | `dem_crs` | 5514 — S-JTSK / Krovák East North. |
 | `dem_vertical_crs` | 8357 — Bpv. |
 | `dem_nodata_value` | −9999. Exists because a row derived before that parameter was passed is **not comparable** to one derived after: without it, uncovered pixels arrive as `0.0` with nothing in the file to say so, and a candidate crossing them becomes a spectacular fictional climb. |
-| `dem_manifest_sha256` | Points at #7's committed per-window manifest rather than carrying it. |
+| `dem_manifest_sha256` | Points at #7's committed per-window manifest rather than carrying it: the sha256 of `derive/manifests/<run>/dem.manifest.json`, which is the manifest minus `run`, so a re-run that fetched nothing does not move it. |
 | `dem_fetched_at` | When. This route publishes no vintage, so this is the only date there is. |
 
 There is **no `region_code` on `derivation`**, on purpose. Climbs are assigned to a kraj by their

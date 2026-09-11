@@ -421,8 +421,14 @@ def test_refuses_an_incomplete_mosaic(tmp_path: Path) -> None:
     assert not (out / OUTPUT_NAME).exists()
 
 
-def test_rerun_is_skipped_and_the_output_deterministic(staged: Path, capsys) -> None:
-    assert run(staged) == 0
+def test_rerun_is_skipped_and_the_output_deterministic(
+    staged: Path, tmp_path: Path, capsys
+) -> None:
+    record = tmp_path / "record"
+    assert run(staged, record=record) == 0
+    written = manifest_of(staged)
+    del written["run"]
+    assert json.loads((record / MANIFEST_NAME).read_text()) == written
     first = sha256_of(staged / OUTPUT_NAME)
     written_at = (staged / OUTPUT_NAME).stat().st_mtime_ns
     capsys.readouterr()

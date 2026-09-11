@@ -65,11 +65,11 @@ from krpaly_derive.dem import (
     SOURCE_CRS,
     read_manifest,
     tile_indices,
-    write_atomically,
 )
 from krpaly_derive.dem import OUTPUT_NAME as DEM_NAME
 from krpaly_derive.extract import OUTPUT_NAME as SOURCE_NAME
 from krpaly_derive.extract import already_done, sha256_of, write_table
+from krpaly_derive.record import RecordError, record_dir, write_atomically, write_record
 
 OUTPUT_NAME = "profiles.parquet"
 MANIFEST_NAME = "profiles.manifest.json"
@@ -312,7 +312,9 @@ def report(written: dict) -> None:
     )
 
 
-def sample(out: Path, candidates: Path, dem: Path, step_m: float, force: bool) -> int:
+def sample(
+    out: Path, candidates: Path, dem: Path, step_m: float, force: bool, record: Path | None = None
+) -> int:
     if not candidates.is_file():
         raise SampleError(
             f"{candidates} is not a file — run krpaly_derive.extract first, or pass --candidates"
@@ -324,6 +326,7 @@ def sample(out: Path, candidates: Path, dem: Path, step_m: float, force: bool) -
     out.mkdir(parents=True, exist_ok=True)
     output_path = out / OUTPUT_NAME
     manifest_path = out / MANIFEST_NAME
+    record = record or record_dir(out)
 
     started = time.monotonic()
     started_at = datetime.now(UTC).isoformat(timespec="seconds")
@@ -332,6 +335,9 @@ def sample(out: Path, candidates: Path, dem: Path, step_m: float, force: bool) -
     dem_sha256 = mosaic["output"]["sha256"]
     signature = stage_signature(source_sha256, dem_sha256, step_m)
     if not force and already_done(manifest_path, output_path, signature):
+        # Recorded from the prior manifest, as extract does, so a no-op re-run
+        # still restores a deleted record.
+        write_record(read_manifest(manifest_path), record, MANIFEST_NAME)
         print(
             f"{output_path} is already sampled from these inputs — pass --force to redo",
             file=sys.stderr,
@@ -435,6 +441,7 @@ def sample(out: Path, candidates: Path, dem: Path, step_m: float, force: bool) -
     write_atomically(
         manifest_path, (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     )
+    write_record(manifest, record, MANIFEST_NAME)
     report(manifest)
     return 0
 
@@ -465,6 +472,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--force", action="store_true", help="re-sample even if the output is already current"
     )
+    parser.add_argument(
+        "--record",
+        type=Path,
+        default=None,
+        help="where the committed copy goes (default: derive/manifests/<name of --out>)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -474,8 +487,9 @@ def main(argv: list[str] | None = None) -> int:
             dem=args.dem or args.out / DEM_NAME,
             step_m=args.step_m,
             force=args.force,
+            record=args.record,
         )
-    except SampleError as error:
+    except (SampleError, RecordError) as error:
         raise SystemExit(f"sample: {error}") from error
 
 

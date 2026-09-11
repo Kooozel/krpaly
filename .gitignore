@@ -14,6 +14,8 @@ dist/
 build/
 
 # Derivation inputs and intermediates — large, reproducible, never committed
+# Manifests are committed under derive/manifests/, not re-included here: git cannot
+# re-include a file under an excluded directory, and the copy in data/ carries `run`.
 data/
 *.pbf
 *.tif

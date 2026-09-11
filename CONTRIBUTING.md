@@ -86,12 +86,18 @@ node scripts/check-pr-title.mjs "<your pull request title>"
 The second is the `pr-title` job; the first is the `check` job, which runs this
 repo's `Makefile` rather than a copy of its steps, so the two cannot drift.
 
-`make check` needs `uv` on your `PATH` and nothing else — it fetches the Python
-in `derive/.python-version` and the tools in `derive/uv.lock` itself:
+`make check` needs `uv` and Node ≥20 on your `PATH` and nothing else. `uv`
+fetches the Python in `derive/.python-version` and the tools in
+`derive/uv.lock` itself:
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+Node runs the vendored climb-engine build that `derive/`'s engine stage calls,
+and its tests call the same build rather than a mock of it. Install it however
+you like; 20 is the floor the build targets and the version CI runs. Without
+`node` those tests skip rather than fail.
 
 krpaly is three languages that arrive at different times, so `check` is **one
 job with one step per area**, and each area no-ops until it has files in it.
@@ -113,8 +119,8 @@ toolchain. `web/` is the one still waiting: its step wants a
 Today `make check` runs `ruff format --check`, `ruff check` and `pytest`
 against `derive/`, then `sqlfluff lint` against `db/`, and skips `web/`.
 
-`db/`'s tests are the one place `make check` needs more than `uv` on your
-`PATH`: the schema tests want a real PostGIS, because every property worth
+`db/`'s tests are the one place `make check` needs more than `uv` and Node on
+your `PATH`: the schema tests want a real PostGIS, because every property worth
 asserting there (a check constraint, a unique over an array, a GiST distance
 query) is the database's behaviour rather than ours. They skip on an unset
 `DATABASE_URL`, so a contributor without Postgres still gets the rest of the

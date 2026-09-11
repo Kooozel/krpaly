@@ -2,8 +2,9 @@
 
 A derivation is reproducible only if its inputs are named exactly. There are three: the OSM extract,
 the terrain, and the engine build. #1 pins the engine — tag *and* commit SHA, read out of the
-release's `VERSION` asset. This document pins the other two, and settles what "in the kraj" means
-for a way that crosses the border.
+release's `VERSION` asset — and [Engine build](#engine-build) records how it is vendored. This
+document pins the other two, and settles what "in the kraj" means for a way that crosses the
+border.
 
 Almost every value below was read back from the source rather than copied from a product page, and
 the [Re-verify](#re-verify) block at the end is the set of commands that read them again — all eight
@@ -309,6 +310,7 @@ boundary_relation_id, boundary_relation_version, boundary_buffer_m, boundary_ass
 dem_product, dem_route, dem_resolution_m, dem_crs, dem_vertical_crs,
   dem_nodata_value, dem_manifest_sha256, dem_fetched_at
 engine_version, engine_commit                                          (from #1)
+engine_config_override                                                 (from #9)
 ```
 
 `boundary_relation_version` holds the version found in the extract, not the live one.
@@ -316,6 +318,40 @@ engine_version, engine_commit                                          (from #1)
 `dem_nodata_value` holds `-9999` and exists because a row derived before that parameter was passed
 is not comparable to one derived after. Per-window checksums stay in #7's committed manifest; the
 row carries `dem_manifest_sha256` and points at it.
+
+## Engine build
+
+climb-engine is a pinned input like the snapshot and the tiles. Detection output is the contract, so
+the same geometry through a different build is different climbs. `derive/vendor/climb-engine/` holds
+one release's **library** and its `VERSION` asset. It does not hold `climb-cli.mjs`: that reads GPX
+and emits ride JSON, the wrong entry point for a DEM profile, and vendoring it invites its use.
+
+| | |
+| --- | --- |
+| Release | `v0.1.0` |
+| Commit | `9fb96def4e9f9d9a3487c1c4701246ec1c42579d` |
+| Built for | Node 20, esbuild ESM bundle — the floor CI runs |
+| Called as | `detectClimbs(tuples, { config })` from `derive/engine/harness.mjs`, scored with `aso` |
+
+`krpaly_derive.detect` reads the tag and the commit out of `VERSION` into its manifest's
+`derivation` block, which is what `derivation.engine_version` and `engine_commit` receive (#1).
+Nobody types them. A tag deleted or re-pointed later still leaves the SHA. The library's sha256 is
+recorded beside them, so a vendored file edited in place shows up as a digest no release has. The
+override krpaly passes over the build's defaults is `ENGINE_CONFIG_OVERRIDE` in `detect.py`,
+recorded as `derivation.engine_config_override`.
+
+To adopt another release, re-vendor rather than edit, and then re-derive. The stage signature
+includes the library's digest, so the next run does that by itself:
+
+```sh
+rm -r derive/vendor/climb-engine
+gh release download <tag> --repo Kooozel/climb-engine \
+  --pattern climb-engine.mjs --pattern VERSION --dir derive/vendor/climb-engine
+echo "vendored_on:   $(date -I)" >> derive/vendor/climb-engine/VERSION
+```
+
+While the version is 0.x, a release whose minor moved is a detector whose output changed. Read its
+notes before adopting it.
 
 ## Re-verify
 

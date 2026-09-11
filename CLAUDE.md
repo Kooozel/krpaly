@@ -12,13 +12,15 @@ make format                                                   # ruff format/chec
 ```
 
 CI runs the `Makefile` itself rather than a copy of its steps, so the two cannot drift. It needs
-`uv` on `PATH` and nothing else — it fetches the Python in `derive/.python-version` (3.13) and the
-tools in `derive/uv.lock` itself. Every `uv run` passes `--locked`, so a `uv.lock` that has fallen
+`uv` and Node ≥20 on `PATH` and nothing else — `uv` fetches the Python in `derive/.python-version`
+(3.13) and the tools in `derive/uv.lock` itself, and Node runs the vendored climb-engine build the
+engine stage and its tests call. Every `uv run` passes `--locked`, so a `uv.lock` that has fallen
 behind `pyproject.toml` fails the gate instead of being rewritten under it.
 
 The one exception is the schema tests, which want a real PostGIS and skip on an unset
 `DATABASE_URL`. CI supplies one as a service container and never skips; locally the rest of the
-gate, `sqlfluff` included, runs without it. `db/README.md` has the `docker run` recipe.
+gate, `sqlfluff` included, runs without it. `db/README.md` has the `docker run` recipe. The engine
+tests skip the same way without `node` on `PATH`, and CI installs it.
 
 `check` is **one job with one step per area**, because the three areas arrive at different times:
 one required context, one gate per area, and no pull request blocked on a language it did not
@@ -61,11 +63,13 @@ that touches the database.
 
 **Present: `.gitignore`, `LICENSE`, `README.md`, `CONTRIBUTING.md`, `ATTRIBUTION.md`, `Makefile`,
 `scripts/`, `docs/agents/`, `.github/`; `derive/`, which has its toolchain, `INPUTS.md`, the
-migration runner and the first three pipeline stages — OSM extraction to candidate polylines, DMR 5G
-acquisition, and elevation sampling into engine-shaped profiles — but nothing after them: no engine
-harness, no loader; and `db/`, which has the schema, its migrations and `db/README.md`.** Everything
-below about `web/` is settled intent, not present code — it is written down because these are
-decisions that are expensive to reverse once rows exist, not because the code is there to read.
+migration runner, the vendored climb-engine build and the first four pipeline stages — OSM
+extraction to candidate polylines, DMR 5G acquisition, elevation sampling into engine-shaped
+profiles, and climb detection through a Node harness — but nothing after them: runs are still one
+candidate each, and there is no anchor dedupe and no loader; and `db/`, which has the schema, its
+migrations and `db/README.md`.** Everything below about `web/` is settled intent, not present code
+— it is written down because these are decisions that are expensive to reverse once rows exist, not
+because the code is there to read.
 
 ## Constraints that bind work before it is written
 

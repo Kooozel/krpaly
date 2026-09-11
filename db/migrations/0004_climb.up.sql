@@ -36,8 +36,9 @@ create table climb (
     gain_m real not null, -- MeasuredClimb.elevation
     avg_grade real not null, -- per cent, as the engine gives it
     -- per cent — maxSustainedGradient × 100, which the engine reports as a
-    -- decimal fraction. The loader owes this conversion: two grade columns
-    -- side by side in one row must agree on their unit.
+    -- decimal fraction. krpaly_derive.detect converts it where engine output
+    -- enters krpaly, so no column of ours ever holds a fraction: two grade
+    -- columns side by side in one row must agree on their unit.
     max_grade real not null,
     -- Null is data in both: it means the scoring model named on the derivation
     -- cleared no threshold for this climb. 'uncategorized' is a category, not

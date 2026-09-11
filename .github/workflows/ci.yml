@@ -50,8 +50,17 @@ jobs:
           version-file: derive/pyproject.toml
           enable-cache: false
 
+      # derive/ needs Node before web/ does: the engine stage runs climb-engine
+      # through derive/engine/harness.mjs, and its tests run the committed
+      # build rather than a mock of it. 20 is the floor the vendored bundle was
+      # built for (derive/vendor/climb-engine/VERSION), so the gate proves the
+      # floor rather than whatever is newest. Pinned to an exact release, as
+      # setup-uv is.
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 20
+
       # One job, one required context, one step per area — and the steps live
       # in the Makefile, so an area turning on is a change to that file rather
-      # than to this one. setup-node lands with web/, alongside the step that
-      # needs it.
+      # than to this one.
       - run: make check

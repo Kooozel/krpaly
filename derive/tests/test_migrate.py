@@ -14,7 +14,9 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
+from krpaly_derive.detect import derivation_block, read_version
 from krpaly_derive.migrate import (
     MigrationError,
     applied_versions,
@@ -36,6 +38,7 @@ REQUIRES_DB = pytest.mark.skipif(
 PINNED_DERIVATION = {
     "engine_version": "v0.1.0",
     "engine_commit": "0" * 40,
+    "engine_config_override": Jsonb({}),
     "scoring_model": "aso",
     "osm_snapshot_url": "https://download.geofabrik.de/europe/czech-republic-260901.osm.pbf",
     "osm_snapshot_sha256": "a" * 64,
@@ -67,9 +70,9 @@ def write_pair(directory: Path, stem: str, *, down: bool = True) -> None:
 
 def test_discovers_the_repos_own_migrations():
     migrations = discover()
-    assert [m.version for m in migrations] == ["0001", "0002", "0003", "0004"]
+    assert [m.version for m in migrations] == ["0001", "0002", "0003", "0004", "0005"]
     assert migrations[0].name == "postgis"
-    assert migrations[-1].name == "climb"
+    assert migrations[-1].name == "engine_config"
 
 
 def test_sorts_by_numeric_prefix_not_lexically(tmp_path):
@@ -187,7 +190,7 @@ def insert_climb(conn, derivation_id: int, **overrides) -> int:
 def test_up_creates_the_schema_on_a_clean_database(migrated):
     # The ticket's first completion criterion.
     assert {"region", "derivation", "climb", "climb_profile"} <= table_names(migrated)
-    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004"}
+    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004", "0005"}
 
 
 @REQUIRES_DB
@@ -230,7 +233,7 @@ def test_up_to_a_version_stops_there_padded_or_not(conn, to):
 @REQUIRES_DB
 def test_up_is_idempotent_when_everything_is_applied(migrated):
     apply_up(migrated, discover())
-    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004"}
+    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004", "0005"}
 
 
 @REQUIRES_DB
@@ -280,6 +283,46 @@ def test_engine_commit_must_be_a_full_hex_sha(migrated, bad_commit):
 def test_scoring_model_rejects_an_unknown_model(migrated):
     with pytest.raises(psycopg.errors.CheckViolation):
         insert_derivation(migrated, scoring_model="strava")
+
+
+@REQUIRES_DB
+@pytest.mark.parametrize("override", [[], "aso", 1, None])
+def test_engine_config_override_must_be_an_object(migrated, override):
+    # JSON null is a value to jsonb, so `not null` alone lets 'null' through.
+    with pytest.raises(psycopg.errors.CheckViolation):
+        insert_derivation(migrated, engine_config_override=Jsonb(override))
+
+
+@REQUIRES_DB
+def test_the_engine_stages_derivation_block_inserts_as_it_stands(migrated):
+    # #9's done-when: the row carries the tag, the SHA and the override, read
+    # out of the vendored VERSION and copied from climbs.manifest.json's
+    # `derivation` block rather than mapped. Jsonb is psycopg's adapter, not a
+    # renaming.
+    block = derivation_block(read_version(), {"CLIMB_START_GRADE_PCT": 4.0}, "aso")
+    override = Jsonb(block["engine_config_override"])
+    derivation_id = insert_derivation(migrated, **block | {"engine_config_override": override})
+    with migrated.cursor() as cur:
+        cur.execute(
+            "select engine_version, engine_commit, engine_config_override, scoring_model "
+            "from derivation where id = %s",
+            (derivation_id,),
+        )
+        assert cur.fetchone() == (
+            "v0.1.0",
+            "9fb96def4e9f9d9a3487c1c4701246ec1c42579d",
+            {"CLIMB_START_GRADE_PCT": 4.0},
+            "aso",
+        )
+
+
+@REQUIRES_DB
+def test_engine_config_override_has_no_default(migrated):
+    # A loader that forgets the column fails, rather than recording "no
+    # override" by accident.
+    without = {k: v for k, v in PINNED_DERIVATION.items() if k != "engine_config_override"}
+    with pytest.raises(psycopg.errors.NotNullViolation):
+        insert_row(migrated, "derivation", without)
 
 
 @REQUIRES_DB

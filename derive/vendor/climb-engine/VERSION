@@ -1,0 +1,17 @@
+version:       0.1.0
+tag:           v0.1.0
+source_repo:   github.com/Kooozel/climb-engine
+source_commit: 9fb96def4e9f9d9a3487c1c4701246ec1c42579d
+commit_date:   2026-09-04T17:40:12+02:00
+built_with:    npm run build  (tsc + esbuild, bundle, esm, node20)
+files:         climb-engine.mjs (library), climb-cli.mjs (executable)
+
+This is a VERSIONED COPY, deliberately not a symlink. Stored climb rows were
+produced by exactly this build. Retuning the detector upstream must never
+silently rewrite training history: to adopt a new engine, re-vendor here, bump
+this file, and re-run the backfill explicitly.
+
+Detection output is the contract. A release whose fixture digests moved carries
+a bumped breaking position — the minor while the version is 0.x — so a version
+that differs from yours in that position is a detector you have not adopted.
+vendored_on:   2026-09-11

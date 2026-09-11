@@ -67,6 +67,16 @@ NODES: dict[int, tuple[float, float]] = {
     20: (18.07, 49.875),
     21: (18.02, 49.815),
     22: (18.02, 49.805),
+    # A column of their own at 18.08–18.09 E, where no other node is, so the
+    # structure ways split nothing and nothing splits them.
+    40: (18.08, 49.810),
+    41: (18.09, 49.810),
+    42: (18.08, 49.820),
+    43: (18.09, 49.820),
+    44: (18.08, 49.830),
+    45: (18.09, 49.830),
+    46: (18.08, 49.840),
+    47: (18.09, 49.840),
     30: (19.00, 49.810),
     31: (19.01, 49.810),
 }
@@ -102,6 +112,12 @@ WAYS: list[tuple[int, str, list[int], dict[str, str]]] = [
     # J crosses A at node 2 but is not cyclable, so it must not split A
     # there. Junction degree is counted over cyclable ways only.
     (210, "J", [21, 2, 22], {"highway": "path"}),
+    # Off the ground, one of each: DMR 5G is bare earth, so these are what #8
+    # must not read the terrain under. N says `bridge=no`, which is ground.
+    (211, "K", [40, 41], {"highway": "residential", "bridge": "viaduct"}),
+    (212, "L", [42, 43], {"highway": "residential", "tunnel": "yes"}),
+    (213, "M", [44, 45], {"highway": "residential", "covered": "yes"}),
+    (214, "N", [46, 47], {"highway": "residential", "bridge": "no"}),
 ]
 
 

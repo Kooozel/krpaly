@@ -18,7 +18,12 @@ import pytest
 import shapely
 from pyarrow import parquet as pq
 
-from krpaly_derive.cyclable import PREDICATE_VERSION, is_cyclable
+from krpaly_derive.cyclable import (
+    PREDICATE_VERSION,
+    STRUCTURE_VERSION,
+    is_cyclable,
+    structure_of,
+)
 from krpaly_derive.extract import MANIFEST_NAME, OUTPUT_NAME, main
 
 FIXTURE = Path(__file__).parent / "fixtures" / "junctions.osm.pbf"
@@ -41,7 +46,15 @@ EXPECTED_SEGMENTS = {
     (207, (15, 16)),  # G, access=private reopened by bicycle=designated
     (208, (17, 18)),  # H, cut where the lollipop rejoins itself
     (208, (18, 19, 20, 18)),
+    (211, (40, 41)),  # K, a viaduct
+    (212, (42, 43)),  # L, a tunnel
+    (213, (44, 45)),  # M, covered
+    (214, (46, 47)),  # N, bridge=no, which is ground
 }
+
+# The structure each way is on; every other way in the fixture is on the
+# ground.
+STRUCTURES = {211: "bridge", 212: "tunnel", 213: "covered"}
 
 
 def run(out: Path, *extra: str) -> int:
@@ -117,6 +130,25 @@ def test_cyclable_predicate(tags: dict[str, str], expected: bool) -> None:
     assert is_cyclable(tags) is expected
 
 
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        ({"bridge": "viaduct"}, "bridge"),
+        ({"bridge": "no"}, None),
+        ({"tunnel": "building_passage"}, "tunnel"),
+        ({"covered": "yes"}, "covered"),
+        # Real combinations, so the precedence is stated rather than left to
+        # dict order: a covered bridge is a bridge.
+        ({"bridge": "yes", "tunnel": "yes"}, "bridge"),
+        ({"bridge": "yes", "covered": "yes"}, "bridge"),
+        ({"bridge": "no", "tunnel": "yes"}, "tunnel"),
+        ({}, None),
+    ],
+)
+def test_structure_of(tags: dict[str, str], expected: str | None) -> None:
+    assert structure_of(tags) == expected
+
+
 def test_junction_split(extracted: Path) -> None:
     """Exactly the segments the fixture is built to produce, and no others.
 
@@ -190,6 +222,26 @@ def test_way_refs_populated(extracted: Path) -> None:
         assert row["node_ids"][-1] == row["end_node_id"]
         assert row["n_points"] == len(row["node_ids"])
         assert len(shapely.from_wkb(row["geometry"]).coords) == row["n_points"]
+
+
+def test_structure_column(extracted: Path) -> None:
+    """Each row carries its way's structure, and both directions carry the same one.
+
+    Read off the way rather than the segment because #6 splits only within a
+    way, so a candidate is wholly on a structure or wholly off it.
+    """
+    for row in rows(extracted):
+        assert row["structure"] == STRUCTURES.get(row["way_refs"][0]), row
+
+
+def test_structures_are_counted_not_dropped(extracted: Path) -> None:
+    counts = manifest(extracted)["counts"]
+    assert counts["segments_bridge"] == 1
+    assert counts["segments_tunnel"] == 1
+    assert counts["segments_covered"] == 1
+    # I, outside the buffer, and nothing else: a structure is not a reason to drop.
+    assert counts["segments_dropped"] == 1
+    assert manifest(extracted)["way_filter"]["structure"] == STRUCTURE_VERSION
 
 
 def test_records_the_boundary_version_from_the_extract(extracted: Path) -> None:
@@ -293,6 +345,20 @@ def test_rederives_when_the_buffer_changes(tmp_path: Path) -> None:
     assert run(out, "--buffer-m", "500") == 0
     assert (out / OUTPUT_NAME).stat().st_mtime_ns != before
     assert manifest(out)["boundary"]["buffer_m"] == 500.0
+
+
+def test_rederives_when_the_manifest_predates_structures(tmp_path: Path) -> None:
+    """A run from before #22 has no structure column, and #8 must not read it as all ground."""
+    out = tmp_path / "out"
+    assert run(out) == 0
+    before = (out / OUTPUT_NAME).stat().st_mtime_ns
+    old = manifest(out)
+    del old["way_filter"]["structure"]
+    (out / MANIFEST_NAME).write_text(json.dumps(old))
+
+    assert run(out) == 0
+    assert (out / OUTPUT_NAME).stat().st_mtime_ns != before
+    assert manifest(out)["way_filter"]["structure"] == STRUCTURE_VERSION
 
 
 def test_boundary_relation_missing(tmp_path: Path) -> None:

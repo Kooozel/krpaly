@@ -120,6 +120,38 @@ Widening any of this is a `cyclable/v2` and a new derivation rather than an edit
 one, which is exactly the visibility wanted: two derivations that differ only by their predicate
 are two sets of rows, told apart by the manifest.
 
+### Structures
+
+DMR 5G is bare earth. Read under every sample, a viaduct profiles the valley it spans and a tunnel
+the hill it passes through, and climb-engine detects either as a climb with total confidence. So
+extraction also records whether a ridden way is off the ground, in `candidates.parquet` →
+`structure`, by `structure_of` in the same module. Its name is `structure/v1`, written into
+`candidates.manifest.json` → `way_filter.structure`.
+
+| `structure` | read from |
+| --- | --- |
+| `bridge` | `bridge` with any value but `no` — `yes`, `viaduct`, `boardwalk` … |
+| `tunnel` | `tunnel` with any value but `no` — `yes`, `building_passage`, `culvert` … |
+| `covered` | `covered` with any value but `no` |
+| null | none of the three, or only `=no` — the ground |
+
+The first that applies wins, in that order. The combinations are real — a covered bridge is
+`bridge=yes` + `covered=yes` — but all three are profiled alike, so the order decides only which
+of `segments_bridge`, `segments_tunnel` and `segments_covered` a candidate is counted in.
+
+**The rule is per candidate** because the tags are on the way and #6 splits only *within* a way:
+every candidate is wholly on a structure or wholly off one, and none needs cutting. `sample.py`
+reads the DEM at a structure candidate's two ends — where it meets the ground — and interpolates
+linearly by distance between them; `profiles.manifest.json` → `sampling.structure_rule` records
+this. The straight line between the abutments is the deck, which flattens the deck's own vertical
+curve and camber: metres truer than a valley floor, and not exact. The ends are still terrain, so an
+end on nodata still drops the candidate.
+
+**A separate version, not `cyclable/v2`.** The ridden set is unchanged, and `cyclable/v2` is kept
+for widening it. A manifest written before this key existed lacks it, so extraction re-derives
+rather than reusing candidates that have no `structure` column — and `sample.py` refuses such a
+file outright.
+
 ## DEM source
 
 ### The product
@@ -238,7 +270,8 @@ point is 115 m (Hřensko), and Moravskoslezský's is about 195 m (Bohumín), so 
 `CLAUDE.md`, whether such candidates are dropped or interpolated across.
 
 #8 settles it: **dropped whole, counted by reason** (`nodata_whole`, `nodata_partial`), so a hole
-never becomes a sea-level climb and the geometry never drifts off its start and end nodes.
+never becomes a sea-level climb and the geometry never drifts off its start and end nodes. A
+structure's interior is never read (§ Structures), so only its two ends can be nodata.
 
 ### The transform #8 samples through
 

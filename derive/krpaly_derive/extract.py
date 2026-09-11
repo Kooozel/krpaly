@@ -46,7 +46,12 @@ from pyproj import Transformer
 from shapely.ops import transform as reproject
 from shapely.prepared import PreparedGeometry, prep
 
-from krpaly_derive.cyclable import PREDICATE_VERSION, is_cyclable
+from krpaly_derive.cyclable import (
+    PREDICATE_VERSION,
+    STRUCTURE_VERSION,
+    is_cyclable,
+    structure_of,
+)
 from krpaly_derive.record import RecordError, record_dir, write_record
 
 # Moravskoslezský kraj. A default rather than a constant because kraj-2 is
@@ -92,6 +97,9 @@ SCHEMA = pa.schema(
         ("start_node_id", pa.int64()),
         ("end_node_id", pa.int64()),
         ("direction", pa.string()),
+        # `bridge`, `tunnel`, `covered`, or null on the ground; the way's. See
+        # derive/INPUTS.md § Structures.
+        ("structure", pa.string()),
         ("geometry", pa.binary()),
         # Equals len(node_ids); the same off-by-one climb_profile guards.
         ("n_points", pa.int32()),
@@ -159,6 +167,9 @@ class Counts:
     `segments_outside_buffer` is the field #6's plan called
     `nodes_out_of_buffer`; it counts segments, as the other two do, and #11
     reads these names out of the manifest.
+
+    The structure counts are over emitted segments and are not drops — they
+    are how many of `segments` #8 profiles between their ends.
     """
 
     ways_seen: int = 0
@@ -167,6 +178,9 @@ class Counts:
     segments_degenerate: int = 0
     segments_missing_location: int = 0
     segments_outside_buffer: int = 0
+    segments_bridge: int = 0
+    segments_tunnel: int = 0
+    segments_covered: int = 0
 
     def as_dict(self) -> dict[str, int]:
         """The counts block of the manifest: what was counted, plus what follows from it."""
@@ -320,7 +334,11 @@ def cut_indices(node_ids: list[int], degree: Counter) -> list[int]:
 
 
 def candidate(
-    way_id: int, node_ids: list[int], coords: list[tuple[float, float]], direction: str
+    way_id: int,
+    node_ids: list[int],
+    coords: list[tuple[float, float]],
+    direction: str,
+    structure: str | None,
 ) -> dict:
     """One row. The reverse direction is this called with both lists reversed.
 
@@ -335,6 +353,7 @@ def candidate(
         "start_node_id": node_ids[0],
         "end_node_id": node_ids[-1],
         "direction": direction,
+        "structure": structure,
         "geometry": shapely.to_wkb(shapely.LineString(coords)),
         "n_points": len(node_ids),
     }
@@ -375,6 +394,7 @@ def emit_ways(
         if len(node_ids) < 2:
             continue
         cuts = cut_indices(node_ids, degree)
+        structure = structure_of(way.tags)
 
         for seq, (start, end) in enumerate(zip(cuts, cuts[1:], strict=False)):
             piece = node_ids[start : end + 1]
@@ -400,8 +420,19 @@ def emit_ways(
                 continue
 
             counts.segments += 1
-            yield (way.id, seq, 0), candidate(way.id, piece, coords, FORWARD)
-            yield (way.id, seq, 1), candidate(way.id, piece[::-1], coords[::-1], REVERSE)
+            # Named rather than built from the tag, as `as_dict` sums its drops:
+            # a structure added to cyclable.py is counted only if someone says so.
+            if structure == "bridge":
+                counts.segments_bridge += 1
+            elif structure == "tunnel":
+                counts.segments_tunnel += 1
+            elif structure == "covered":
+                counts.segments_covered += 1
+            yield (way.id, seq, 0), candidate(way.id, piece, coords, FORWARD, structure)
+            yield (
+                (way.id, seq, 1),
+                candidate(way.id, piece[::-1], coords[::-1], REVERSE, structure),
+            )
 
 
 def write_parquet(rows: list[dict], path: Path) -> None:
@@ -447,6 +478,9 @@ def stage_signature(
     return {
         ("osm_snapshot", "sha256"): snapshot["sha256"],
         ("way_filter", "version"): PREDICATE_VERSION,
+        # A manifest from before #22 lacks this key, so its candidates — which
+        # have no structure column — are re-derived rather than reused.
+        ("way_filter", "structure"): STRUCTURE_VERSION,
         ("boundary", "relation_id"): boundary_relation,
         ("boundary", "buffer_m"): buffer_m,
     }
@@ -513,7 +547,7 @@ def extract(
             "sha256": sha256_of(pbf),
             **header,
         },
-        "way_filter": {"version": PREDICATE_VERSION},
+        "way_filter": {"version": PREDICATE_VERSION, "structure": STRUCTURE_VERSION},
     }
 
     signature = stage_signature(provenance["osm_snapshot"], boundary_relation, buffer_m)

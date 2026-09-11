@@ -38,6 +38,7 @@ from krpaly_derive.sample import (
     MANIFEST_NAME,
     OUTPUT_NAME,
     PINNED_OPERATION,
+    STRUCTURE_RULE,
     SampleError,
     bilinear,
     main,
@@ -252,8 +253,17 @@ LINES_M = {
     "zero": [ZERO_AT, (ZERO_AT[0] + 40.0, ZERO_AT[1])],
     # Two distinct nodes on one spot: no length to profile.
     "degenerate": [(-469870.0, -1103980.0), (-469870.0, -1103980.0)],
+    # The hole's own geometry, on a bridge: #22 in miniature, with the hole
+    # standing in for the valley. As terrain it is dropped; as a deck it is
+    # read at its two ends, both clear of the hole, and kept.
+    "bridge": [(-470000.0, -1104085.0), (-469940.0, -1104085.0)],
+    # BASE into GAP, in a tunnel: an end on nodata still drops a structure.
+    "tunnel": [(-469800.0, -1103900.0), (-469700.0, -1103800.0)],
 }
-KEPT = ("plane", "seam", "short")
+KEPT = ("plane", "seam", "short", "bridge")
+
+# The structure each line is on; the rest are on the ground.
+STRUCTURES = {"bridge": "bridge", "tunnel": "tunnel"}
 
 
 def to_degrees(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -262,15 +272,20 @@ def to_degrees(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
     return [pinned.transform(x, y, direction=TransformDirection.INVERSE) for x, y in points]
 
 
-def write_candidates(path: Path) -> dict[str, tuple[int, int]]:
+def write_candidates(
+    path: Path,
+    lines: dict[str, list[tuple[float, float]]] = LINES_M,
+    structures: dict[str, str] = STRUCTURES,
+) -> dict[str, tuple[int, int]]:
     """`candidates.parquet` as #6 writes it; returns each line's (forward, reverse) ids."""
     rows, ids = [], {}
-    for index, (name, line) in enumerate(LINES_M.items()):
+    for index, (name, line) in enumerate(lines.items()):
         coords = to_degrees(line)
         node_ids = [10 * index + 1, 10 * index + 2]
         ids[name] = (len(rows), len(rows) + 1)
-        rows.append(candidate(index, node_ids, coords, FORWARD))
-        rows.append(candidate(index, node_ids[::-1], coords[::-1], REVERSE))
+        structure = structures.get(name)
+        rows.append(candidate(index, node_ids, coords, FORWARD, structure))
+        rows.append(candidate(index, node_ids[::-1], coords[::-1], REVERSE, structure))
     write_parquet(rows, path)
     return ids
 
@@ -328,8 +343,9 @@ def test_nodata_drops_the_whole_candidate_and_is_counted(sampled) -> None:
     assert counts["kept"] == 2 * len(KEPT)
     assert counts["degenerate"] == 2
     assert counts["nodata_whole"] == 2  # the gap, both ways
-    assert counts["nodata_partial"] == 4  # the hole and the zero, both ways
+    assert counts["nodata_partial"] == 6  # the hole, the zero and the tunnel, both ways
     assert counts["nodata_samples"] > 0
+    assert counts["structures"] == 2  # the bridge, both ways; the tunnel was dropped
     assert counts["samples"] == sum(row["n_samples"] for row in profiles.values())
 
     for row in profiles.values():
@@ -368,10 +384,68 @@ def test_profiles_are_engine_tuples_on_the_plane(sampled) -> None:
 
 def test_rows_keep_the_order_of_the_candidates(sampled) -> None:
     """Row order is `candidates.parquet`'s, which is part of "same inputs, same bytes"."""
-    out, _ids = sampled
+    out, ids = sampled
     written = pq.read_table(out / OUTPUT_NAME).column("candidate_id").to_pylist()
-    # plane, seam and short are the first three lines, both ways each.
-    assert written == [0, 1, 2, 3, 4, 5]
+    # plane, seam and short are the first three lines, both ways each; the
+    # bridge comes after the lines dropped between them.
+    assert written == [0, 1, 2, 3, 4, 5, *ids["bridge"]]
+
+
+def test_structure_is_interpolated_between_its_ends(sampled) -> None:
+    """The bridge crosses the hole, and its profile is the straight line between its ends.
+
+    The terrain under its middle is asserted NaN first, so the test cannot pass
+    by reading it. On a plane, the line between two ends on a straight line
+    *is* the plane, so the analytic height is still the answer to a millimetre.
+    """
+    out, ids = sampled
+    line = LINES_M["bridge"]
+    middle = ((line[0][0] + line[1][0]) / 2, line[0][1])
+    assert np.isnan(read_at(out, [middle])[0])
+
+    row = profiles_of(out)[ids["bridge"][0]]
+    d = np.array(row["distance_m"])
+    assert d[0] == 0.0 and abs(d[-1] - 60.0) < 5e-3
+    assert np.all(np.diff(d) > 0) and np.all(np.diff(d) <= STEP_M)
+    assert row["n_samples"] > 2
+
+    xs, ys = pinned_transformer().transform(np.array(row["lon"]), np.array(row["lat"]))
+    assert np.max(np.abs(np.array(row["elevation_m"]) - plane(xs, ys))) < 1e-3
+
+
+def test_refuses_candidates_without_a_structure_column(tmp_path: Path) -> None:
+    """A candidates file from before #22 would profile every viaduct as its valley."""
+    out = tmp_path / "kraj-1"
+    write_mosaic(out)
+    path = out / "candidates.parquet"
+    write_candidates(path)
+    pq.write_table(pq.read_table(path).drop_columns(["structure"]), path)
+
+    with pytest.raises(SampleError) as raised:
+        run(out)
+    assert "structure" in str(raised.value)
+    assert "krpaly_derive.extract" in str(raised.value)
+    assert not (out / OUTPUT_NAME).exists()
+
+
+def test_a_structure_reads_only_its_two_ends(tmp_path: Path) -> None:
+    """A 70 m tunnel wholly in GAP: eight samples each way, and two of them read.
+
+    Both ends are nodata, so it is dropped wholly rather than partly, and the
+    nodata samples counted are the four ends read — not the sixteen samples
+    the line has, whose interiors are not terrain.
+    """
+    out = tmp_path / "kraj-1"
+    write_mosaic(out)
+    deep = {"deep": [(-469700.0, -1103750.0), (-469630.0, -1103750.0)]}
+    write_candidates(out / "candidates.parquet", deep, {"deep": "tunnel"})
+    assert run(out) == 0
+
+    counts = manifest_of(out)["counts"]
+    assert counts["candidates"] == 2
+    assert counts["kept"] == 0 and counts["structures"] == 0
+    assert counts["nodata_whole"] == 2 and counts["nodata_partial"] == 0
+    assert counts["nodata_samples"] == 4
 
 
 def test_refuses_a_proj_without_the_pinned_operation(monkeypatch) -> None:
@@ -408,6 +482,7 @@ def test_manifest_records_the_pin_and_both_inputs(sampled) -> None:
     assert written["source"]["dem_sha256"] == sha256_of(out / DEM_VRT)
     assert written["sampling"]["step_m"] == STEP_M
     assert written["sampling"]["method"] == "bilinear"
+    assert written["sampling"]["structure_rule"] == STRUCTURE_RULE
     assert written["output"]["sha256"] == sha256_of(out / OUTPUT_NAME)
 
 

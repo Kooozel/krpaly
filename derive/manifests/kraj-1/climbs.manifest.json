@@ -3,15 +3,15 @@
     "by_category": {
       "1": 13,
       "2": 158,
-      "3": 503,
-      "4": 2069,
+      "3": 499,
+      "4": 2064,
       "HC": 2,
-      "null": 20973,
-      "uncategorized": 4881
+      "null": 20231,
+      "uncategorized": 4861
     },
-    "climbs": 28599,
+    "climbs": 27828,
     "runs": 190334,
-    "runs_with_climbs": 28162
+    "runs_with_climbs": 27391
   },
   "derivation": {
     "engine_commit": "9fb96def4e9f9d9a3487c1c4701246ec1c42579d",
@@ -62,14 +62,14 @@
     "vendored_on": "2026-09-11"
   },
   "output": {
-    "bytes": 2712266,
+    "bytes": 2641200,
     "file": "climbs.parquet",
-    "sha256": "ef597dc72f6a787aa4157de4d11c1e446a34a88c5d6920c6519b7a587912cbf5"
+    "sha256": "52e5ef340f2d2514b6c4772321da6e503ea9ddd2af5a729d7bbaf9fc21aaa9f2"
   },
   "source": {
     "candidates": "candidates.parquet",
-    "candidates_sha256": "3057dbe1437191acefba68b00728796f59c11459b8ab87aebe4caf566f0b0285",
+    "candidates_sha256": "eacc40b65050f181dac939b421f79dee50350139dc2cd87471704343bfe205b1",
     "profiles": "profiles.parquet",
-    "profiles_sha256": "45bc69cac8f2ac8c04dc2574d1e5aa51a8cd8ef39630ab922db6fae64819b3ea"
+    "profiles_sha256": "560e37d278c80ea0ab39d4ebbbf28f6a1194b5913da9e2bb7be1f351b47cf9b6"
   }
 }

@@ -20,12 +20,14 @@ one Node process for the whole batch (derive/engine/harness.mjs).
   `maxSustainedGradient` is a fraction beside `avgGrade`'s per cent. It
   becomes per cent in this file, so no column of ours ever holds a fraction.
 
-Each run is one candidate for now. Which chains are worth walking across a
-junction is #10's decision — it is bound up with which candidate wins an
-anchor — and `single_runs` is the seam it replaces. `join_profiles` already
-takes a run of any length.
+A run is an ascending chain of candidates, walked by `krpaly_derive.runs`:
+the best path through every rising candidate, so a climb that crosses dozens
+of junctions reaches the engine whole rather than as fragments. The walk's
+policy and parameters are in this stage's signature, so retuning it re-derives
+rather than resuming.
 
-It does not dedupe (#10) or load anything (#11).
+It does not anchor or dedupe what it finds (#10's anchor stage), and it loads
+nothing (#11).
 """
 
 from __future__ import annotations
@@ -39,8 +41,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, NoReturn
@@ -53,6 +54,9 @@ from krpaly_derive.dem import read_manifest
 from krpaly_derive.extract import OUTPUT_NAME as SOURCE_NAME
 from krpaly_derive.extract import already_done, sha256_of, write_table
 from krpaly_derive.record import RecordError, record_dir, write_atomically, write_record
+from krpaly_derive.runs import POLICY_VERSION as RUNS_POLICY_VERSION
+from krpaly_derive.runs import Profile, Run, ascending_runs
+from krpaly_derive.runs import parameters as run_parameters
 from krpaly_derive.sample import MANIFEST_NAME as PROFILES_MANIFEST
 from krpaly_derive.sample import OUTPUT_NAME as PROFILES_NAME
 
@@ -99,7 +103,7 @@ SCHEMA = pa.schema(
         # Position in emission order, as candidate_id is.
         ("run_id", pa.uint64()),
         # The run itself: the candidates the profile was joined from, in
-        # order. One element until #10 walks runs across junctions.
+        # order, as krpaly_derive.runs chained them.
         ("candidate_ids", pa.list_(pa.uint64())),
         # The climb's position among its run's climbs, in order along it.
         ("climb_index", pa.int32()),
@@ -124,25 +128,9 @@ SCHEMA = pa.schema(
     ]
 )
 
-# A run is an ordered chain of candidate ids, each ending where the next one
-# starts.
-Run = tuple[int, ...]
-
 
 class DetectError(Exception):
     """An input or an engine reply this stage cannot use, said in one line."""
-
-
-@dataclass(frozen=True, eq=False)
-class Profile:
-    """One candidate's profile, #8's columns joined to #6's end nodes."""
-
-    start_node_id: int
-    end_node_id: int
-    distance_m: np.ndarray
-    elevation_m: np.ndarray
-    lat: np.ndarray
-    lon: np.ndarray
 
 
 def read_version(path: Path = VERSION_FILE) -> dict[str, str]:
@@ -184,11 +172,6 @@ def derivation_block(version: Mapping[str, str], override: dict, model: str) -> 
         "engine_config_override": override,
         "scoring_model": model,
     }
-
-
-def single_runs(candidate_ids: Iterable[int]) -> list[Run]:
-    """One run per candidate, in the order given. The seam #10 replaces."""
-    return [(int(candidate_id),) for candidate_id in candidate_ids]
 
 
 def join_profiles(run: Run, profiles: Mapping[int, Profile]) -> list[list[float]]:
@@ -461,6 +444,10 @@ def stage_signature(
         ("engine", "harness_sha256"): harness_sha256,
         ("derivation", "engine_config_override"): override,
         ("derivation", "scoring_model"): model,
+        # The walk decides what the engine is shown, so a changed walk is as
+        # much a re-derivation as a retuned detector.
+        ("runs", "policy_version"): RUNS_POLICY_VERSION,
+        ("runs", "parameters"): run_parameters(),
     }
 
 
@@ -468,6 +455,13 @@ def report(written: dict) -> None:
     """What the engine made of the profiles, on stderr, as sample.py reports."""
     counts = written["counts"]
     derivation = written["derivation"]
+    walk = written["runs"]
+    print(
+        f"runs: {walk['runs']} over {walk['rising']} rising candidates, "
+        f"{walk['coverage_pct']}% covered, longest {walk['longest_run_m'] / 1000:.1f} km "
+        f"({walk['longest_run_candidates']} candidates)",
+        file=sys.stderr,
+    )
     print(
         f"climbs: {counts['climbs']} over {counts['runs']} runs, "
         f"{counts['runs_with_climbs']} with at least one",
@@ -534,7 +528,11 @@ def detect_stage(
         return 0
 
     loaded = load_profiles(profiles, candidates)
-    runs = single_runs(loaded)
+    runs, walk = ascending_runs(loaded)
+    # Counted here rather than in the walk, which sees only the profiles: a
+    # candidate #8 dropped for nodata ends every chain that reaches it, and a
+    # kraj with many of them means #7 under-fetched.
+    walk["chains_broken_by_missing_profile"] = pq.read_metadata(candidates).num_rows - len(loaded)
     rows: list[dict] = []
     runs_with_climbs = 0
     with Harness(override, model) as harness:
@@ -567,6 +565,7 @@ def detect_stage(
             "effective_config": harness.effective_config,
         },
         "derivation": derivation_block(version, override, model),
+        "runs": walk,
         "counts": {
             "runs": len(runs),
             "runs_with_climbs": runs_with_climbs,
@@ -592,6 +591,22 @@ def detect_stage(
     return 0
 
 
+def json_object(text: str) -> dict:
+    """A CLI argument that has to be a JSON object, refused on the spot.
+
+    argparse's own error is what an operator wants here: a typed override that
+    does not parse should not reach the harness, which would answer with a
+    line about a key it never saw.
+    """
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(f"{text!r} is not JSON: {error}") from error
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a JSON object")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="krpaly_derive.detect", description=__doc__)
     parser.add_argument(
@@ -610,6 +625,15 @@ def main(argv: list[str] | None = None) -> int:
         help=f"the candidates they were sampled from (default: <out>/{SOURCE_NAME})",
     )
     parser.add_argument(
+        "--config-override",
+        type=json_object,
+        default=None,
+        help="DetectClimbsOptions to change, as a JSON object (default: "
+        "ENGINE_CONFIG_OVERRIDE, which is empty). It is recorded in "
+        "derivation.engine_config_override either way, so a retune experiment "
+        "need not be an uncommitted edit of this file",
+    )
+    parser.add_argument(
         "--force", action="store_true", help="re-detect even if the output is already current"
     )
     parser.add_argument(
@@ -625,7 +649,9 @@ def main(argv: list[str] | None = None) -> int:
             out=args.out,
             profiles=args.profiles or args.out / PROFILES_NAME,
             candidates=args.candidates or args.out / SOURCE_NAME,
-            override=ENGINE_CONFIG_OVERRIDE,
+            override=ENGINE_CONFIG_OVERRIDE
+            if args.config_override is None
+            else args.config_override,
             model=SCORING_MODEL,
             force=args.force,
             record=args.record,

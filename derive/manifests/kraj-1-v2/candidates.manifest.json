@@ -1,0 +1,39 @@
+{
+  "boundary": {
+    "assignment": "summit",
+    "buffer_m": 10000.0,
+    "relation_id": 442461,
+    "relation_version": 267
+  },
+  "counts": {
+    "candidates": 275476,
+    "segments": 137738,
+    "segments_bridge": 4976,
+    "segments_covered": 415,
+    "segments_degenerate": 0,
+    "segments_dropped": 1129195,
+    "segments_missing_location": 0,
+    "segments_outside_buffer": 1129195,
+    "segments_tunnel": 253,
+    "ways_cyclable": 820698,
+    "ways_seen": 9594656
+  },
+  "osm_snapshot": {
+    "bytes": 945133839,
+    "file": "czech-republic-260901.osm.pbf",
+    "replication_base_url": "https://download.geofabrik.de/europe/czech-republic-updates",
+    "replication_seq": "4897",
+    "replication_ts": "2026-09-01T20:20:50Z",
+    "sha256": "c6491be9a32e881779de3676609a9974bc917fde2069ffdd5fae09948be8e527",
+    "writingprogram": "osmium/1.16.0"
+  },
+  "output": {
+    "bytes": 21656799,
+    "file": "candidates.parquet",
+    "sha256": "7232589913fb7847fa0aeb1ea0a42cd868d8e475a1f16c9662040bb9589d6afa"
+  },
+  "way_filter": {
+    "structure": "structure/v1",
+    "version": "cyclable/v2"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "counts": {
+    "candidates": 275476,
+    "degenerate": 0,
+    "kept": 272492,
+    "nodata_partial": 522,
+    "nodata_samples": 70612,
+    "nodata_whole": 2462,
+    "samples": 4522732,
+    "structures": 11220
+  },
+  "output": {
+    "bytes": 77345584,
+    "file": "profiles.parquet",
+    "sha256": "8cc77e7d9c87f3426ee2eb455fce36b62f3cfdcba0dedf687d5efe182bf19b74"
+  },
+  "sampling": {
+    "method": "bilinear",
+    "nodata_rule": "a candidate any of whose samples has a nodata or 0.0 pixel among its four neighbours is dropped whole",
+    "step_m": 10.0,
+    "structure_rule": "a bridge, tunnel or covered candidate is read at its two endpoints only and interpolated linearly by distance between them"
+  },
+  "source": {
+    "bytes": 21656799,
+    "dem": "dem.vrt",
+    "dem_sha256": "78de087fddc7651f7a80f9d8d0e9da3dfcf3d85f8c7320552eb1a8315401db8d",
+    "file": "candidates.parquet",
+    "sha256": "7232589913fb7847fa0aeb1ea0a42cd868d8e475a1f16c9662040bb9589d6afa"
+  },
+  "transform": {
+    "accuracy_m": 1.0,
+    "code": 5239,
+    "dem_planned_with": {
+      "operation": "axis order change (2D) + Inverse of S-JTSK to WGS 84 (3) + Krovak East North (Greenwich)",
+      "operation_accuracy_m": 6.0,
+      "operations_available": 4,
+      "proj_version": "9.8.1"
+    },
+    "operation": "axis order change (2D) + Inverse of S-JTSK to WGS 84 (5) + Krovak East North (Greenwich)",
+    "proj_version": "9.8.1"
+  }
+}

@@ -1,17 +1,17 @@
 {
   "counts": {
     "by_category": {
-      "1": 13,
-      "2": 165,
-      "3": 537,
-      "4": 2219,
-      "HC": 2,
-      "null": 25291,
-      "uncategorized": 5447
+      "1": 705,
+      "2": 1276,
+      "3": 2404,
+      "4": 6377,
+      "HC": 4,
+      "null": 15547,
+      "uncategorized": 10375
     },
-    "climbs": 33674,
-    "runs": 272492,
-    "runs_with_climbs": 33242
+    "climbs": 36688,
+    "runs": 64506,
+    "runs_with_climbs": 34061
   },
   "derivation": {
     "engine_commit": "9fb96def4e9f9d9a3487c1c4701246ec1c42579d",
@@ -62,9 +62,28 @@
     "vendored_on": "2026-09-11"
   },
   "output": {
-    "bytes": 3172054,
+    "bytes": 3530680,
     "file": "climbs.parquet",
-    "sha256": "54b5d8bf7bbcb810d6e3a9a0670e74a7a8bd03bb39b062635b01a59e87fd5c35"
+    "sha256": "fb422bb45614be98202099c5a4d37ff39884edefc02160a36304dd347994861b"
+  },
+  "runs": {
+    "candidate_instances": 611308,
+    "candidates_covered": 135598,
+    "chains_broken_by_missing_profile": 2984,
+    "coverage_pct": 100.0,
+    "longest_run_candidates": 80,
+    "longest_run_m": 22306.9,
+    "parameters": {
+      "dip_drop_m": 0.0,
+      "dip_gap_m": 1200.0,
+      "dip_ratio": 0.0,
+      "max_run_m": 25000.0
+    },
+    "policy_version": 1,
+    "profiled": 272492,
+    "rising": 135598,
+    "runs": 64506,
+    "runs_at_max_run_m": 0
   },
   "source": {
     "candidates": "candidates.parquet",

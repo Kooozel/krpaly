@@ -30,15 +30,14 @@ from krpaly_derive.detect import (
     VERSION_FILE,
     DetectError,
     Harness,
-    Profile,
     climb_rows,
     detect_stage,
     join_profiles,
     main,
     read_version,
-    single_runs,
 )
 from krpaly_derive.extract import FORWARD, REVERSE, candidate, sha256_of, write_parquet, write_table
+from krpaly_derive.runs import Profile
 from krpaly_derive.sample import MANIFEST_NAME as PROFILES_MANIFEST
 from krpaly_derive.sample import OUTPUT_NAME as PROFILES_NAME
 from krpaly_derive.sample import SCHEMA as PROFILES_SCHEMA
@@ -52,11 +51,15 @@ ENGINE_COMMIT = "9fb96def4e9f9d9a3487c1c4701246ec1c42579d"
 
 
 def ramp(
-    length_m: float, grade_pct: float, lead_m: float = 1000.0, tail_m: float = 1000.0
+    length_m: float,
+    grade_pct: float,
+    lead_m: float = 1000.0,
+    tail_m: float = 1000.0,
+    foot_m: float = 300.0,
 ) -> list[list[float]]:
     """Flat, `length_m` at `grade_pct`, flat: `[distance, elevation, lat, lon]` every 10 m."""
     d = np.arange(0.0, lead_m + length_m + tail_m + 5.0, 10.0)
-    e = 300.0 + np.clip(d - lead_m, 0.0, length_m) * grade_pct / 100
+    e = foot_m + np.clip(d - lead_m, 0.0, length_m) * grade_pct / 100
     return np.column_stack([d, e, 49.5 + d / 111_000, np.full_like(d, 18.5)]).tolist()
 
 
@@ -105,10 +108,6 @@ def profile(start: int, end: int, distances: list[float], elevations: list[float
         lat=49.5 + d / 111_000,
         lon=np.full_like(d, 18.5),
     )
-
-
-def test_single_runs_is_one_run_per_candidate_in_order() -> None:
-    assert single_runs([4, 9, 2]) == [(4,), (9,), (2,)]
 
 
 def test_a_run_of_two_offsets_the_second_and_shares_the_junction() -> None:
@@ -316,15 +315,17 @@ def test_a_reply_about_another_run_is_refused(
 # --- the stage ---------------------------------------------------------------
 
 
-def write_stage(out: Path, roads: list[list[list[float]]]) -> None:
+def write_stage(out: Path, roads: list[list[list[float]]], chain: bool = False) -> None:
     """#6's candidates and #8's profiles, in their own forms: each road both ways.
 
     Candidate 2k is road k forward, 2k + 1 the same road reversed, as #6 emits
-    them. The geometry is two points — this stage never reads it.
+    them. The geometry is two points — this stage never reads it. With `chain`,
+    each road starts at the node the one before it ended on, so the walk can
+    join them into one run.
     """
     rows, profiles = [], []
     for k, points in enumerate(roads):
-        nodes = [10 * k + 1, 10 * k + 2]
+        nodes = [k + 1, k + 2] if chain else [10 * k + 1, 10 * k + 2]
         ends = [(points[0][3], points[0][2]), (points[-1][3], points[-1][2])]
         rows.append(candidate(100 + k, nodes, ends, FORWARD, None))
         rows.append(candidate(100 + k, nodes[::-1], ends[::-1], REVERSE, None))
@@ -354,6 +355,68 @@ def write_stage(out: Path, roads: list[list[list[float]]]) -> None:
 
 
 @REQUIRES_NODE
+def test_two_candidates_that_meet_are_detected_as_one_climb(
+    tmp_path: Path,
+) -> None:
+    """The whole point of the walk: a climb cut in two by a junction is one climb.
+
+    Each half is 600 m at 6 %, which the engine would report as two short
+    climbs if it were shown them separately.
+    """
+    write_stage(
+        tmp_path,
+        [
+            ramp(600, 6, lead_m=500, tail_m=0),
+            ramp(600, 6, lead_m=0, tail_m=500, foot_m=336.0),
+        ],
+        chain=True,
+    )
+    assert main(["--out", str(tmp_path), "--record", str(tmp_path / "record")]) == 0
+
+    table = pq.read_table(tmp_path / OUTPUT_NAME)
+    assert table.column("candidate_ids").to_pylist() == [[0, 2]]
+    # 1 200 m at 6 %: the sum of the halves, not either of them.
+    assert table.column("gain_m").to_pylist()[0] == pytest.approx(72.0, abs=4.0)
+    assert json.loads((tmp_path / MANIFEST_NAME).read_text())["runs"]["runs"] == 1
+
+
+@REQUIRES_NODE
+def test_a_changed_config_override_re_detects_rather_than_resuming(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The retune experiment #10 owes, without an uncommitted edit of detect.py."""
+    write_stage(tmp_path, [ramp(2000, 6)])
+    record = tmp_path / "record"
+    assert main(["--out", str(tmp_path), "--record", str(record)]) == 0
+
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "--out",
+                str(tmp_path),
+                "--record",
+                str(record),
+                "--config-override",
+                '{"CLIMB_START_GRADE_PCT": 4.5}',
+            ]
+        )
+        == 0
+    )
+    assert "already" not in capsys.readouterr().err
+    manifest = json.loads((tmp_path / MANIFEST_NAME).read_text())
+    assert manifest["derivation"]["engine_config_override"] == {"CLIMB_START_GRADE_PCT": 4.5}
+    assert manifest["engine"]["effective_config"]["CLIMB_START_GRADE_PCT"] == 4.5
+
+
+def test_a_config_override_that_is_not_a_json_object_is_refused() -> None:
+    with pytest.raises(SystemExit):
+        main(["--out", "unused", "--config-override", "[1, 2]"])
+    with pytest.raises(SystemExit):
+        main(["--out", "unused", "--config-override", "{oops}"])
+
+
+@REQUIRES_NODE
 def test_the_stage_writes_climbs_and_a_derivation_ready_manifest(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -374,7 +437,11 @@ def test_the_stage_writes_climbs_and_a_derivation_ready_manifest(
     }
     assert manifest["engine"]["library_sha256"] == sha256_of(detect.LIBRARY)
     counts = manifest["counts"]
-    assert (counts["runs"], counts["runs_with_climbs"], counts["climbs"]) == (4, 2, 2)
+    # Two runs, not four: the reversed roads descend, and the walk is over
+    # rising candidates.
+    assert (counts["runs"], counts["runs_with_climbs"], counts["climbs"]) == (2, 2, 2)
+    assert manifest["runs"]["rising"] == 2
+    assert manifest["runs"]["coverage_pct"] == 100.0
     assert counts["by_category"]["4"] == 1
     assert counts["by_category"]["null"] == 1
 

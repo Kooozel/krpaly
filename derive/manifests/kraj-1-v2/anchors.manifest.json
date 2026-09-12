@@ -1,0 +1,49 @@
+{
+  "anchor": {
+    "junction_tolerance_m": 1.0,
+    "policy_version": 1
+  },
+  "counts": {
+    "anchor_collisions": 181,
+    "by_candidates": {
+      "1": 4253,
+      "10+": 4828,
+      "2": 3796,
+      "3": 3022,
+      "4": 2315,
+      "5": 1806,
+      "6": 1434,
+      "7": 1130,
+      "8": 978,
+      "9": 796
+    },
+    "by_category": {
+      "1": 300,
+      "2": 764,
+      "3": 1532,
+      "4": 4420,
+      "HC": 4,
+      "null": 9842,
+      "uncategorized": 7496
+    },
+    "climbs": 24358,
+    "collapsed": 12149,
+    "detections": 36688,
+    "max_way_refs": 46,
+    "multi_candidate": 20105,
+    "summits_multi": 3827
+  },
+  "output": {
+    "bytes": 2949295,
+    "file": "anchors.parquet",
+    "sha256": "d599c474a50c1d5f191ea331d6c7d49503fb7d1abd76d1f74d3a7830d32836ce"
+  },
+  "source": {
+    "candidates": "candidates.parquet",
+    "candidates_sha256": "7232589913fb7847fa0aeb1ea0a42cd868d8e475a1f16c9662040bb9589d6afa",
+    "climbs": "climbs.parquet",
+    "climbs_sha256": "fb422bb45614be98202099c5a4d37ff39884edefc02160a36304dd347994861b",
+    "profiles": "profiles.parquet",
+    "profiles_sha256": "8cc77e7d9c87f3426ee2eb455fce36b62f3cfdcba0dedf687d5efe182bf19b74"
+  }
+}

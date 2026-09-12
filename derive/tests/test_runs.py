@@ -11,8 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from krpaly_derive import runs as runs_module
-from krpaly_derive.runs import MAX_RUN_M, Profile, Run, ascending_runs
+from krpaly_derive.runs import MAX_RUN_M, Parameters, Profile, Run, ascending_runs
 
 
 def leg(start_node: int, end_node: int, length_m: float, gain_m: float) -> Profile:
@@ -142,12 +141,22 @@ def test_the_longest_ascent_wins_the_junction() -> None:
 
 
 def test_max_run_m_trims_the_chain_and_is_counted() -> None:
-    legs = [(node, node + 1, 6000.0, 40.0) for node in range(1, 7)]
-    runs, counts = ascending_runs(stacked(*legs))
+    profiles = stacked(*[(node, node + 1, 6000.0, 40.0) for node in range(1, 7)])
+    runs, counts = ascending_runs(profiles)
 
     assert counts["runs_at_max_run_m"] > 0
-    assert all(sum(6000.0 for _ in run) <= MAX_RUN_M for run in runs)
-    assert covers(runs, stacked(*legs))
+    assert all(6000.0 * len(run) <= MAX_RUN_M for run in runs)
+    # Trimmed, but never past the candidate the run was emitted to cover.
+    assert covers(runs, profiles)
+
+
+def test_a_shorter_max_run_m_trims_harder() -> None:
+    profiles = stacked(*[(node, node + 1, 600.0, 40.0) for node in range(1, 7)])
+    runs, counts = ascending_runs(profiles, Parameters(max_run_m=1500.0))
+
+    assert all(600.0 * len(run) <= 1500.0 for run in runs)
+    assert counts["parameters"]["max_run_m"] == 1500.0
+    assert covers(runs, profiles)
 
 
 def test_two_walks_over_the_same_profiles_agree() -> None:
@@ -191,12 +200,9 @@ def test_a_dip_ends_the_chain_while_dips_are_off() -> None:
     assert counts["parameters"]["dip_drop_m"] == 0.0
 
 
-def test_a_dip_within_the_drop_is_bridged_when_it_is_turned_on(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_dip_within_the_drop_is_bridged_when_it_is_turned_on() -> None:
     """The §03 experiment, which measured worse — see the module docstring."""
-    monkeypatch.setattr(runs_module, "DIP_DROP_M", 25.0)
-    runs, counts = ascending_runs(dipped())
+    runs, counts = ascending_runs(dipped(), Parameters(dip_drop_m=25.0))
 
     # The falling candidate is on the run: it is what the chain crossed.
     assert runs == [(0, 1, 2)]
@@ -205,32 +211,23 @@ def test_a_dip_within_the_drop_is_bridged_when_it_is_turned_on(
     assert counts["rising"] == counts["candidates_covered"] == 2
 
 
-def test_a_dip_deeper_than_the_drop_still_ends_the_chain(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(runs_module, "DIP_DROP_M", 5.0)
-    runs, _ = ascending_runs(dipped())
+def test_a_dip_deeper_than_the_drop_still_ends_the_chain() -> None:
+    runs, _ = ascending_runs(dipped(), Parameters(dip_drop_m=5.0))
 
     assert runs == [(0,), (2,)]
 
 
-def test_a_dip_is_refused_when_too_deep_for_the_gain_so_far(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_dip_is_refused_when_too_deep_for_the_gain_so_far() -> None:
     """MERGE_VALLEY_RATIO's shape: a 10 m dip needs a climb worth dipping into."""
-    monkeypatch.setattr(runs_module, "DIP_DROP_M", 25.0)
-    monkeypatch.setattr(runs_module, "DIP_RATIO", 0.2)
     # 20 % of the 30 m climbed so far is 6 m, and the dip is 10 m.
-    assert ascending_runs(dipped())[0] == [(0,), (2,)]
+    strict = Parameters(dip_drop_m=25.0, dip_ratio=0.2)
+    assert ascending_runs(dipped(), strict)[0] == [(0,), (2,)]
 
-    monkeypatch.setattr(runs_module, "DIP_RATIO", 0.5)
-    assert ascending_runs(dipped())[0] == [(0, 1, 2)]
+    lenient = Parameters(dip_drop_m=25.0, dip_ratio=0.5)
+    assert ascending_runs(dipped(), lenient)[0] == [(0, 1, 2)]
 
 
-def test_a_dip_further_than_the_gap_is_not_reached_for(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(runs_module, "DIP_DROP_M", 25.0)
-    monkeypatch.setattr(runs_module, "DIP_GAP_M", 100.0)
+def test_a_dip_further_than_the_gap_is_not_reached_for() -> None:
     # The connector is 400 m long, so the next rise is out of reach.
-    assert ascending_runs(dipped())[0] == [(0,), (2,)]
+    near = Parameters(dip_drop_m=25.0, dip_gap_m=100.0)
+    assert ascending_runs(dipped(), near)[0] == [(0,), (2,)]

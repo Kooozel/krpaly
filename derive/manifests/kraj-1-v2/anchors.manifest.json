@@ -6,37 +6,37 @@
   "counts": {
     "anchor_collisions": 181,
     "by_candidates": {
-      "1": 4252,
-      "10+": 4829,
+      "1": 4253,
+      "10+": 4828,
       "2": 3796,
-      "3": 3020,
-      "4": 2310,
-      "5": 1810,
-      "6": 1436,
-      "7": 1128,
-      "8": 977,
-      "9": 800
+      "3": 3022,
+      "4": 2315,
+      "5": 1806,
+      "6": 1434,
+      "7": 1130,
+      "8": 978,
+      "9": 796
     },
     "by_category": {
       "1": 300,
-      "2": 765,
-      "3": 1531,
+      "2": 764,
+      "3": 1532,
       "4": 4420,
       "HC": 4,
-      "null": 9845,
-      "uncategorized": 7493
+      "null": 9842,
+      "uncategorized": 7496
     },
     "climbs": 24358,
     "collapsed": 12149,
     "detections": 36688,
     "max_way_refs": 46,
-    "multi_candidate": 20106,
+    "multi_candidate": 20105,
     "summits_multi": 3827
   },
   "output": {
-    "bytes": 2948388,
+    "bytes": 2949295,
     "file": "anchors.parquet",
-    "sha256": "c3ff63101299bac8e588a8005fd0c34b939fe6780e43d6af86a7a57624b10935"
+    "sha256": "d599c474a50c1d5f191ea331d6c7d49503fb7d1abd76d1f74d3a7830d32836ce"
   },
   "source": {
     "candidates": "candidates.parquet",

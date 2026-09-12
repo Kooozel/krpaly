@@ -77,18 +77,53 @@ class Profile:
     lon: np.ndarray
 
 
-def parameters() -> dict[str, float]:
-    """What the walk was run with, for the manifest and the stage signature."""
-    return {
-        "max_run_m": MAX_RUN_M,
-        "dip_drop_m": DIP_DROP_M,
-        "dip_gap_m": DIP_GAP_M,
-        "dip_ratio": DIP_RATIO,
-    }
+@dataclass(frozen=True)
+class Parameters:
+    """What the walk was run with: the defaults, or what `detect` was told.
+
+    Passed rather than read off the module so the §03 experiment is a flag on
+    the stage, and so the manifest records what a run actually used rather
+    than what this file happens to say today.
+    """
+
+    max_run_m: float = MAX_RUN_M
+    dip_drop_m: float = DIP_DROP_M
+    dip_gap_m: float = DIP_GAP_M
+    dip_ratio: float = DIP_RATIO
+
+    def as_dict(self) -> dict[str, float]:
+        """For the manifest's `runs` block and the stage signature."""
+        return {
+            "max_run_m": self.max_run_m,
+            "dip_drop_m": self.dip_drop_m,
+            "dip_gap_m": self.dip_gap_m,
+            "dip_ratio": self.dip_ratio,
+        }
+
+    def allows(self, drop: float, gained: float) -> bool:
+        """Whether a bridge's drop is one the chain has earned the right to cross."""
+        if drop <= 0.0:
+            return True
+        return drop <= self.dip_drop_m and (
+            self.dip_ratio <= 0.0 or drop <= self.dip_ratio * gained
+        )
+
+    @property
+    def bridges_dips(self) -> bool:
+        return self.dip_drop_m > 0.0 and self.dip_gap_m > 0.0
 
 
 @dataclass(frozen=True, eq=False)
-class _Graph:
+class Heights:
+    """Every candidate's foot, top and length, read once off its profile."""
+
+    foot: dict[int, float]
+    top: dict[int, float]
+    length: dict[int, float]
+
+
+@dataclass(frozen=True, eq=False)
+class Graph:
     """The rising candidates and how they chain, read once off the profiles."""
 
     gain: dict[int, float]
@@ -100,23 +135,27 @@ class _Graph:
     via: dict[tuple[int, int], tuple[Run, float]]
 
 
-def _read(profiles: Mapping[int, Profile]) -> tuple[dict[int, float], ...]:
-    """Each candidate's foot, top and length, in one pass over the arrays."""
+def heights_of(profiles: Mapping[int, Profile]) -> Heights:
+    """Each candidate's foot, top and length, in one pass over the arrays.
+
+    `length` is `distance_m[-1] − distance_m[0]`, which is the figure
+    `detect.join_profiles` accumulates and `anchor` maps a climb back onto:
+    the shared junction vertex is never counted twice.
+    """
     foot, top, length = {}, {}, {}
     for candidate_id, profile in profiles.items():
         foot[candidate_id] = float(profile.elevation_m[0])
         top[candidate_id] = float(profile.elevation_m[-1])
         length[candidate_id] = float(profile.distance_m[-1] - profile.distance_m[0])
-    return foot, top, length
+    return Heights(foot=foot, top=top, length=length)
 
 
-def _bridges(
+def bridges(
     profiles: Mapping[int, Profile],
     rising: set[int],
-    top: dict[int, float],
-    foot: dict[int, float],
-    length: dict[int, float],
+    heights: Heights,
     by_start: dict[int, list[int]],
+    parameters: Parameters,
 ) -> dict[tuple[int, int], tuple[Run, float]]:
     """Edges from a top across a dip to a higher rise, when `DIP_DROP_M` allows.
 
@@ -125,11 +164,12 @@ def _bridges(
     that would take the chain more than `DIP_DROP_M` under the top it left.
     Empty — and the search skipped entirely — while dips are off.
     """
-    if DIP_DROP_M <= 0.0 or DIP_GAP_M <= 0.0:
+    if not parameters.bridges_dips:
         return {}
+    foot, top, length = heights.foot, heights.top, heights.length
     found: dict[tuple[int, int], tuple[Run, float]] = {}
     for start in sorted(rising):
-        floor = top[start] - DIP_DROP_M
+        floor = top[start] - parameters.dip_drop_m
         queue: list[tuple[float, int, Run, float]] = [
             (0.0, profiles[start].end_node_id, (), top[start])
         ]
@@ -142,7 +182,7 @@ def _bridges(
                 if top[step] < floor or foot[step] < floor:
                     continue
                 reached = walked + length[step]
-                if reached > DIP_GAP_M:
+                if reached > parameters.dip_gap_m:
                     continue
                 if step in rising and top[step] > top[start]:
                     drop = top[start] - min(low, foot[step])
@@ -158,9 +198,10 @@ def _bridges(
     return found
 
 
-def _graph(profiles: Mapping[int, Profile]) -> _Graph:
+def graph_of(profiles: Mapping[int, Profile], parameters: Parameters) -> Graph:
     """The rising candidates, and every edge a chain may take between them."""
-    foot, top, length = _read(profiles)
+    heights = heights_of(profiles)
+    foot, top, length = heights.foot, heights.top, heights.length
     rising = {candidate_id for candidate_id in profiles if top[candidate_id] > foot[candidate_id]}
 
     by_start: dict[int, list[int]] = defaultdict(list)
@@ -180,14 +221,14 @@ def _graph(profiles: Mapping[int, Profile]) -> _Graph:
                 via[candidate_id, step] = ((), 0.0)
         successors[candidate_id] = onward
 
-    for (start, step), bridge in _bridges(profiles, rising, top, foot, length, by_start).items():
+    for (start, step), bridge in bridges(profiles, rising, heights, by_start, parameters).items():
         if step not in successors[start]:
             successors[start].append(step)
             via[start, step] = bridge
     for onward in successors.values():
         onward.sort()
 
-    return _Graph(
+    return Graph(
         gain={c: top[c] - foot[c] for c in rising},
         # Every candidate, not only the rising ones: a bridge's connector steps
         # are on the run and count towards its length.
@@ -198,14 +239,9 @@ def _graph(profiles: Mapping[int, Profile]) -> _Graph:
     )
 
 
-def _allowed(drop: float, gained: float) -> bool:
-    """Whether a bridge's drop is one the chain has earned the right to cross."""
-    if drop <= 0.0:
-        return True
-    return drop <= DIP_DROP_M and (DIP_RATIO <= 0.0 or drop <= DIP_RATIO * gained)
-
-
-def _passes(graph: _Graph, order: list[int]) -> tuple[dict, dict, dict, dict]:
+def passes(
+    graph: Graph, order: list[int], parameters: Parameters
+) -> tuple[dict[int, float], dict[int, float], dict[int, int | None], dict[int, int | None]]:
     """Best gain into and out of every candidate, with the pointer that made it.
 
     `order` is a topological order, so one forward sweep settles every
@@ -223,7 +259,7 @@ def _passes(graph: _Graph, order: list[int]) -> tuple[dict, dict, dict, dict]:
         best, chosen = 0.0, None
         for previous in sorted(predecessors.get(candidate_id, ())):
             gained = best_in[previous]
-            if gained > best and _allowed(graph.via[previous, candidate_id][1], gained):
+            if gained > best and parameters.allows(graph.via[previous, candidate_id][1], gained):
                 best, chosen = gained, previous
         best_in[candidate_id] = best + graph.gain[candidate_id]
         parent[candidate_id] = chosen
@@ -233,7 +269,7 @@ def _passes(graph: _Graph, order: list[int]) -> tuple[dict, dict, dict, dict]:
     for candidate_id in reversed(order):
         best, chosen = 0.0, None
         for step in graph.successors[candidate_id]:
-            if best_out[step] > best and _allowed(
+            if best_out[step] > best and parameters.allows(
                 graph.via[candidate_id, step][1], best_in[candidate_id]
             ):
                 best, chosen = best_out[step], step
@@ -243,7 +279,7 @@ def _passes(graph: _Graph, order: list[int]) -> tuple[dict, dict, dict, dict]:
     return best_in, best_out, parent, child
 
 
-def _path(graph: _Graph, candidate_id: int, parent: dict, child: dict) -> list[int]:
+def path_through(graph: Graph, candidate_id: int, parent: dict, child: dict) -> list[int]:
     """The best chain through one candidate, bridges expanded into their steps."""
     behind: list[int] = []
     at = candidate_id
@@ -260,7 +296,7 @@ def _path(graph: _Graph, candidate_id: int, parent: dict, child: dict) -> list[i
     return [*behind, candidate_id, *ahead]
 
 
-def _trim(graph: _Graph, path: list[int], keep: int) -> tuple[Run, bool]:
+def trim(graph: Graph, path: list[int], keep: int, max_run_m: float) -> tuple[Run, bool]:
     """`path` shortened to `MAX_RUN_M`, from whichever end is further from `keep`.
 
     `keep` survives whatever happens: it is the candidate the run was emitted
@@ -268,24 +304,27 @@ def _trim(graph: _Graph, path: list[int], keep: int) -> tuple[Run, bool]:
     loop choosing it again.
     """
     total = sum(graph.length[c] for c in path)
-    trimmed = total > MAX_RUN_M
-    while total > MAX_RUN_M and path[0] != keep:
+    trimmed = total > max_run_m
+    while total > max_run_m and path[0] != keep:
         total -= graph.length[path.pop(0)]
-    while total > MAX_RUN_M and path[-1] != keep:
+    while total > max_run_m and path[-1] != keep:
         total -= graph.length[path.pop()]
     return tuple(path), trimmed
 
 
-def ascending_runs(profiles: Mapping[int, Profile]) -> tuple[list[Run], dict]:
+def ascending_runs(
+    profiles: Mapping[int, Profile], parameters: Parameters | None = None
+) -> tuple[list[Run], dict]:
     """Maximal ascending chains of candidates, and what the walk did.
 
     Every rising candidate comes back on at least one run. A candidate #8
     dropped for nodata has no profile, is not in the graph, and so ends the
     chains that reach it — nothing may be profiled across a hole in the DEM.
     """
-    graph = _graph(profiles)
+    parameters = parameters or Parameters()
+    graph = graph_of(profiles, parameters)
     order = sorted(graph.gain, key=lambda c: (graph.top[c], c))
-    best_in, best_out, parent, child = _passes(graph, order)
+    best_in, best_out, parent, child = passes(graph, order, parameters)
 
     covered: set[int] = set()
     emitted: set[Run] = set()
@@ -293,7 +332,12 @@ def ascending_runs(profiles: Mapping[int, Profile]) -> tuple[list[Run], dict]:
     for candidate_id in sorted(order, key=lambda c: (graph.gain[c] - best_in[c] - best_out[c], c)):
         if candidate_id in covered:
             continue
-        run, trimmed = _trim(graph, _path(graph, candidate_id, parent, child), candidate_id)
+        run, trimmed = trim(
+            graph,
+            path_through(graph, candidate_id, parent, child),
+            candidate_id,
+            parameters.max_run_m,
+        )
         at_max += trimmed
         covered.update(run)
         covered.add(candidate_id)
@@ -304,7 +348,7 @@ def ascending_runs(profiles: Mapping[int, Profile]) -> tuple[list[Run], dict]:
     longest = max(range(len(runs)), key=lambda i: (lengths[i], -i)) if runs else None
     counts = {
         "policy_version": POLICY_VERSION,
-        "parameters": parameters(),
+        "parameters": parameters.as_dict(),
         "profiled": len(profiles),
         "rising": len(graph.gain),
         "runs": len(runs),

@@ -182,14 +182,20 @@ def covered_range(run: list[int], lengths: dict[int, float], start: float, end: 
 
     `cumulative[i]` is where candidate `run[i]` starts along the joined
     profile, so the climb's start lies in the last candidate that begins at or
-    before it and its end in the first that reaches it. A climb ending exactly
-    on a junction ends with the candidate before that junction, which is what
-    the tolerance is for.
+    before it and its end in the first that reaches it.
+
+    The tolerance applies to **both** ends, and inwards. A climb that opens
+    half a metre before a junction has not really climbed the candidate before
+    it — the samples are 10 m apart and the engine reports a position along
+    the profile, not an intention — and letting that sliver widen the anchor
+    would move the identity for a change of less than one sample.
     """
     cumulative = [0.0]
     for candidate_id in run:
         cumulative.append(cumulative[-1] + lengths[candidate_id])
-    first = min(max(bisect.bisect_right(cumulative, start) - 1, 0), len(run) - 1)
+    first = min(
+        max(bisect.bisect_right(cumulative, start + JUNCTION_TOLERANCE_M) - 1, 0), len(run) - 1
+    )
     last = bisect.bisect_left(cumulative, end - JUNCTION_TOLERANCE_M, 1) - 1
     last = min(max(last, first), len(run) - 1)
     return run[first : last + 1], start - cumulative[first], end - cumulative[first]
@@ -241,13 +247,25 @@ def anchored(climbs: pa.Table, lengths: dict[int, float], anchors: dict) -> list
     return rows
 
 
-def _better(row: dict) -> tuple:
-    """Ordering within a collision: the longer chain, then the greater gain.
+def contains_first(row: dict) -> tuple:
+    """Ordering for the dedupe: the longer chain first, then the greater gain.
 
-    The tie after that is `(run_id, climb_index)`, so which detection wins is
-    a property of the input rather than of the iteration order.
+    Longest first is what lets the suffix test be one pass — a chain can only
+    be contained in one already seen.
     """
-    return (-len(row["candidate_ids"]), -row["gain_m"], row["run_id"], row["climb_index"])
+    return (-len(row["candidate_ids"]), *strongest(row))
+
+
+def strongest(row: dict) -> tuple:
+    """Ordering for a collision: the greater gain, then the earlier detection.
+
+    Chain length is deliberately not in here. Two rows that collide already
+    agree on the way sequence and both nodes, so how finely the junctions cut
+    them is a fact about node degree and says nothing about which climb this
+    is; the gain does. The `(run_id, climb_index)` tie makes the winner a
+    property of the input rather than of the iteration order.
+    """
+    return (-row["gain_m"], row["run_id"], row["climb_index"])
 
 
 def dedupe(rows: list[dict]) -> tuple[list[dict], int]:
@@ -268,7 +286,7 @@ def dedupe(rows: list[dict]) -> tuple[list[dict], int]:
     collapsed = 0
     for summit in sorted(groups):
         winners: list[dict] = []
-        for row in sorted(groups[summit], key=_better):
+        for row in sorted(groups[summit], key=contains_first):
             chain = tuple(row["candidate_ids"])
             into = next(
                 (
@@ -298,7 +316,7 @@ def unique_anchors(rows: list[dict]) -> tuple[list[dict], int]:
     """
     winners: dict[tuple, dict] = {}
     collisions = 0
-    for row in sorted(rows, key=_better):
+    for row in sorted(rows, key=strongest):
         key = (tuple(row["way_refs"]), row["start_node_id"], row["end_node_id"])
         if key in winners:
             winners[key]["collapsed"] += 1 + row["collapsed"]

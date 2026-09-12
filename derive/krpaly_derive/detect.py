@@ -55,8 +55,7 @@ from krpaly_derive.extract import OUTPUT_NAME as SOURCE_NAME
 from krpaly_derive.extract import already_done, sha256_of, write_table
 from krpaly_derive.record import RecordError, record_dir, write_atomically, write_record
 from krpaly_derive.runs import POLICY_VERSION as RUNS_POLICY_VERSION
-from krpaly_derive.runs import Profile, Run, ascending_runs
-from krpaly_derive.runs import parameters as run_parameters
+from krpaly_derive.runs import Parameters, Profile, Run, ascending_runs
 from krpaly_derive.sample import MANIFEST_NAME as PROFILES_MANIFEST
 from krpaly_derive.sample import OUTPUT_NAME as PROFILES_NAME
 
@@ -432,6 +431,7 @@ def stage_signature(
     harness_sha256: str,
     override: dict,
     model: str,
+    walk: Parameters,
 ) -> dict[tuple[str, str], object]:
     """Everything about a run that changes what comes out of it, keyed as #6 keys it.
 
@@ -447,7 +447,7 @@ def stage_signature(
         # The walk decides what the engine is shown, so a changed walk is as
         # much a re-derivation as a retuned detector.
         ("runs", "policy_version"): RUNS_POLICY_VERSION,
-        ("runs", "parameters"): run_parameters(),
+        ("runs", "parameters"): walk.as_dict(),
     }
 
 
@@ -492,6 +492,7 @@ def detect_stage(
     model: str,
     force: bool,
     record: Path | None = None,
+    walk: Parameters | None = None,
 ) -> int:
     if not profiles.is_file():
         raise DetectError(
@@ -502,6 +503,7 @@ def detect_stage(
             f"{candidates} is not a file — run krpaly_derive.extract first, or pass --candidates"
         )
     version = read_version()
+    walk = walk or Parameters()
 
     out.mkdir(parents=True, exist_ok=True)
     output_path = out / OUTPUT_NAME
@@ -515,7 +517,7 @@ def detect_stage(
     library_sha256 = sha256_of(LIBRARY)
     harness_sha256 = sha256_of(HARNESS)
     signature = stage_signature(
-        profiles_sha256, candidates_sha256, library_sha256, harness_sha256, override, model
+        profiles_sha256, candidates_sha256, library_sha256, harness_sha256, override, model, walk
     )
     if not force and already_done(manifest_path, output_path, signature):
         # Recorded from the prior manifest, as extract does, so a no-op re-run
@@ -528,11 +530,11 @@ def detect_stage(
         return 0
 
     loaded = load_profiles(profiles, candidates)
-    runs, walk = ascending_runs(loaded)
+    runs, walked = ascending_runs(loaded, walk)
     # Counted here rather than in the walk, which sees only the profiles: a
     # candidate #8 dropped for nodata ends every chain that reaches it, and a
     # kraj with many of them means #7 under-fetched.
-    walk["chains_broken_by_missing_profile"] = pq.read_metadata(candidates).num_rows - len(loaded)
+    walked["chains_broken_by_missing_profile"] = pq.read_metadata(candidates).num_rows - len(loaded)
     rows: list[dict] = []
     runs_with_climbs = 0
     with Harness(override, model) as harness:
@@ -565,7 +567,7 @@ def detect_stage(
             "effective_config": harness.effective_config,
         },
         "derivation": derivation_block(version, override, model),
-        "runs": walk,
+        "runs": walked,
         "counts": {
             "runs": len(runs),
             "runs_with_climbs": runs_with_climbs,
@@ -634,6 +636,34 @@ def main(argv: list[str] | None = None) -> int:
         "need not be an uncommitted edit of this file",
     )
     parser.add_argument(
+        "--max-run-m",
+        type=float,
+        default=Parameters.max_run_m,
+        help=f"longest run the walk may emit (default: {Parameters.max_run_m:.0f})",
+    )
+    parser.add_argument(
+        "--dip-drop-m",
+        type=float,
+        default=Parameters.dip_drop_m,
+        help="how far under its own top a chain may dip to reach the next rise "
+        f"(default: {Parameters.dip_drop_m:.0f}, which is off). Every setting of "
+        "this measured worse than off — see krpaly_derive.runs and #10 — and it "
+        "is a flag so that the measurement can be repeated",
+    )
+    parser.add_argument(
+        "--dip-gap-m",
+        type=float,
+        default=Parameters.dip_gap_m,
+        help=f"how far a dip may reach for that rise (default: {Parameters.dip_gap_m:.0f})",
+    )
+    parser.add_argument(
+        "--dip-ratio",
+        type=float,
+        default=Parameters.dip_ratio,
+        help="a dip is also capped at this share of the gain already made, as "
+        f"MERGE_VALLEY_RATIO caps a merge (default: {Parameters.dip_ratio}, off)",
+    )
+    parser.add_argument(
         "--force", action="store_true", help="re-detect even if the output is already current"
     )
     parser.add_argument(
@@ -655,6 +685,12 @@ def main(argv: list[str] | None = None) -> int:
             model=SCORING_MODEL,
             force=args.force,
             record=args.record,
+            walk=Parameters(
+                max_run_m=args.max_run_m,
+                dip_drop_m=args.dip_drop_m,
+                dip_gap_m=args.dip_gap_m,
+                dip_ratio=args.dip_ratio,
+            ),
         )
     except (DetectError, RecordError) as error:
         raise SystemExit(f"detect: {error}") from error

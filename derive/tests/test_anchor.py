@@ -164,6 +164,53 @@ def test_a_climb_covers_only_the_candidates_it_reaches(tmp_path: Path) -> None:
     assert (row["start_offset_m"], row["end_offset_m"]) == (100.0, 600.0)
 
 
+def test_a_sliver_past_a_junction_does_not_widen_the_anchor(tmp_path: Path) -> None:
+    """Both ends are quantized inwards, or a retune of half a metre moves identity.
+
+    The engine reports a position along the profile it was given, and #8's
+    samples are 10 m apart, so a climb opening 0,5 m before a junction has not
+    climbed the candidate before it.
+    """
+    write_inputs(
+        tmp_path,
+        [(101, 1, 2, 400), (102, 2, 3, 600), (103, 3, 4, 500)],
+        [detection(0, (0, 1, 2), 399.5, 1000.5)],
+    )
+    assert run(tmp_path) == 0
+
+    (row,) = rows_of(tmp_path)
+    # Without the tolerance on the start, candidate 0 would be dragged in by
+    # half a metre and way 101 would be part of the identity.
+    assert row["candidate_ids"] == [1]
+    assert row["way_refs"] == [102]
+    assert (row["start_node_id"], row["end_node_id"]) == (2, 3)
+
+
+def test_a_collision_is_won_by_gain_not_by_how_finely_it_was_cut(tmp_path: Path) -> None:
+    """Two chains on one anchor agree on every way and both nodes.
+
+    How many candidates each was cut into is a fact about node degree, so the
+    longer chain is not the better climb; the greater gain is.
+    """
+    write_inputs(
+        tmp_path,
+        # Candidate 0 is way 101 whole; candidates 1 and 2 are the same way
+        # between the same two junctions, split at an intermediate node.
+        [(101, 1, 2, 1000), (101, 1, 5, 400), (101, 5, 2, 600)],
+        [
+            detection(0, (0,), 0.0, 1000.0, gain=150.0),
+            detection(1, (1, 2), 0.0, 1000.0, gain=90.0),
+        ],
+    )
+    assert run(tmp_path) == 0
+
+    (row,) = rows_of(tmp_path)
+    assert row["way_refs"] == [101]
+    assert row["gain_m"] == 150.0
+    assert row["candidate_ids"] == [0]
+    assert manifest_of(tmp_path)["counts"]["anchor_collisions"] == 1
+
+
 # --- the dedupe --------------------------------------------------------------
 
 

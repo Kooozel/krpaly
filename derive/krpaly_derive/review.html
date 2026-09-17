@@ -7,62 +7,94 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
+  /* Identity: the ride is orange, alternatives A and B blue and aqua, the rest
+     dark grey and dashed. Three hues is what validates all-pairs; every line
+     also carries its letter, so colour never carries identity alone. */
   :root {
-    --bg: #f6f5f2; --panel: #fff; --ink: #1d1d1b; --muted: #6b6a66; --line: #dddad3;
-    --climb: #2563eb; --second: #7c3aed; --ride: #ea580c; --ok: #15803d; --bad: #b91c1c;
-    --accent: #2563eb;
+    --bg: #f9f9f7; --panel: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --line: #e1e0d9; --axis: #c3c2b7;
+    --ride: #eb6834; --alt-a: #2a78d6; --alt-b: #1baf7a; --alt-rest: #52514e;
+    --accent: #2a78d6; --ok: #006300; --bad: #d03b3b;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #151514; --panel: #1f1f1d; --ink: #ecebe7; --muted: #9c9a94; --line: #34332f;
-      --climb: #60a5fa; --second: #a78bfa; --ride: #fb923c; --ok: #4ade80; --bad: #f87171;
-      --accent: #60a5fa;
+    :root:where(:not([data-theme="light"])) {
+      --bg: #0d0d0d; --panel: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --line: #2c2c2a; --axis: #383835;
+      --ride: #d95926; --alt-a: #3987e5; --alt-b: #199e70; --alt-rest: #c3c2b7;
+      --accent: #3987e5; --ok: #0ca30c; --bad: #e66767;
     }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .app { display: grid; grid-template-columns: 1fr 360px; height: 100vh; }
-  .main { display: grid; grid-template-rows: auto 1fr 190px; min-width: 0; }
+  .app { display: grid; grid-template-columns: 1fr 400px; height: 100vh; }
+  .main { display: grid; grid-template-rows: auto 1fr 210px; min-width: 0; }
   header { display: flex; gap: 12px; align-items: baseline; padding: 10px 16px;
            border-bottom: 1px solid var(--line); flex-wrap: wrap; }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  .why { color: var(--muted); }
+  .why { color: var(--ink-2); }
   #map { min-height: 0; }
-  #profile { width: 100%; height: 100%; display: block; border-top: 1px solid var(--line);
-             background: var(--panel); }
+  .plot { position: relative; border-top: 1px solid var(--line); background: var(--panel); }
+  #profile { width: 100%; height: 100%; display: block; }
+  .readout { position: absolute; pointer-events: none; background: var(--panel); color: var(--ink);
+             border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 12px;
+             box-shadow: 0 2px 8px rgb(0 0 0 / 0.15); display: none; white-space: nowrap;
+             font-variant-numeric: tabular-nums; }
+  .readout div { display: flex; gap: 6px; align-items: center; }
   aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto;
-          padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+          padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+  h2 { font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 4px 0 -4px;
+       text-transform: uppercase; letter-spacing: 0.04em; }
   .progress { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 8px;
               font-size: 12px; align-items: center; }
   .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--accent); }
   .progress button { all: unset; cursor: pointer; }
   .progress button:hover { text-decoration: underline; }
-  .stats { display: grid; gap: 6px; }
-  .stat { display: flex; gap: 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
-  .swatch { width: 14px; height: 4px; border-radius: 2px; flex: none; transform: translateY(-3px); }
+  .cards { display: grid; gap: 6px; }
+  .card { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; padding: 8px 10px;
+          border: 1px solid var(--line); border-radius: 8px; text-align: left; background: transparent;
+          color: inherit; font: inherit; width: 100%; }
+  .card.pickable { cursor: pointer; }
+  .card.pickable:hover, .card.hover { border-color: var(--ink-2); }
+  .card.picked { border: 2px solid var(--accent); padding: 7px 9px; }
+  .badge { grid-row: span 2; width: 24px; height: 24px; border-radius: 50%; display: grid;
+           place-items: center; color: #fff; font-weight: 700; font-size: 13px; align-self: start;
+           background: var(--c); }
+  .badge.rest { background: transparent; color: var(--ink); border: 2px dashed var(--c); }
+  .figures { font-variant-numeric: tabular-nums; }
+  .tags { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--ink-2); }
+  .tag { border: 1px solid var(--line); border-radius: 10px; padding: 0 7px; }
+  .tag.strong { border-color: var(--ink-2); color: var(--ink); font-weight: 600; }
+  .tags a { color: var(--ink-2); margin-left: auto; }
   .choices { display: grid; gap: 6px; }
   .choice { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px 10px;
             border: 1px solid var(--line); border-radius: 6px; background: transparent;
             color: inherit; font: inherit; cursor: pointer; }
   .choice:hover { border-color: var(--accent); }
   .choice kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line);
-                border-radius: 4px; padding: 0 5px; color: var(--muted); }
+                border-radius: 4px; padding: 0 5px; color: var(--ink-2); }
   .choice.chosen { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .choice.auto { border-style: dashed; }
-  textarea { width: 100%; min-height: 48px; background: transparent; color: inherit;
+  textarea { width: 100%; min-height: 44px; background: transparent; color: inherit;
              border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
   .nav { display: flex; gap: 6px; flex-wrap: wrap; }
-  .nav button, .links a { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
-             background: transparent; color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
-  .links { display: flex; gap: 6px; flex-wrap: wrap; }
-  .muted { color: var(--muted); font-size: 12px; }
+  .nav button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+                background: transparent; color: inherit; font: inherit; cursor: pointer; }
+  .muted { color: var(--ink-2); font-size: 12px; margin: 0; }
   .status { font-size: 12px; min-height: 1.4em; }
   .status.bad { color: var(--bad); } .status.ok { color: var(--ok); }
-  @media (max-width: 820px) {
+  /* Map badges sit on light tiles in both themes, so they use the light steps. */
+  .map-badge { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+               font: 700 12px system-ui, sans-serif; color: #fff; background: var(--c);
+               border: 2px solid #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.4); }
+  .map-badge.rest { background: #fff; color: #0b0b0b; border: 2px dashed var(--c); }
+  .map-pill { padding: 1px 6px; border-radius: 9px; font: 600 11px system-ui, sans-serif; color: #fff;
+              background: #eb6834; border: 2px solid #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+              white-space: nowrap; width: max-content; }
+  @media (max-width: 860px) {
     .app { grid-template-columns: 1fr; height: auto; }
-    .main { grid-template-rows: auto 55vh 170px; }
+    .main { grid-template-rows: auto 55vh 190px; }
     aside { border-left: 0; border-top: 1px solid var(--line); }
   }
 </style>
@@ -75,12 +107,17 @@
       <span class="why" id="why"></span>
     </header>
     <div id="map"></div>
-    <svg id="profile" role="img" aria-label="elevation profile"></svg>
+    <div class="plot">
+      <svg id="profile" role="img" aria-label="elevation profiles, aligned along the ride"></svg>
+      <div class="readout" id="readout"></div>
+    </div>
   </div>
   <aside>
     <div class="progress" id="progress"></div>
-    <div class="stats" id="stats"></div>
-    <div class="links" id="links"></div>
+    <h2 id="ride-head">Your ride</h2>
+    <div class="cards" id="ride"></div>
+    <h2 id="alt-head">In the database</h2>
+    <div class="cards" id="alts"></div>
     <div class="choices" id="choices"></div>
     <textarea id="note" placeholder="Note (optional) — saved with the verdict"></textarea>
     <div class="status" id="status"></div>
@@ -89,17 +126,25 @@
       <button id="next" title="→">Next →</button>
       <button id="todo" title="n">Next undecided (n)</button>
     </div>
-    <p class="muted">Keys: number picks a verdict and moves on · ← → browse · n next undecided.
-      Blue is the database climb, violet the second of a pair (dashed), orange your ride.</p>
+    <p class="muted">Keys: 1–7 verdict and move on · a–f select a database climb · ← → browse ·
+      n next undecided. Hover a climb, its line, or the profile to compare.</p>
   </aside>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const LETTERS = "ABCDEF";
+// Map lines sit on light tiles in both themes: always the light steps.
+const MAP = { ride: "#eb6834", a: "#2a78d6", b: "#1baf7a", rest: "#3d3c39" };
+
 let queue, verdicts = {}, at = 0, map, layers;
+let view = null; // the item on screen: its series, layers, pick and hover
 
 const km = (m) => (m / 1000).toFixed(2) + " km";
-const grade = (c) => `${c.avg_grade_pct.toFixed(1)} % avg · ${c.max_grade_pct.toFixed(1)} % max`;
+const metresOf = (a, b) => {
+  const s = Math.cos(a[0] * Math.PI / 180);
+  return Math.hypot(a[0] - b[0], (a[1] - b[1]) * s) * 111195;
+};
 
 function mapyRoute(samples) {
   // mapy.com URL API: start, end and at most 15 waypoints, lon,lat.
@@ -115,7 +160,25 @@ function mapyRoute(samples) {
 
 function decision(item) {
   const v = verdicts[item.id];
-  return v ? { verdict: v.verdict, auto: false, note: v.note } : item.auto ? { verdict: item.auto, auto: true } : null;
+  if (v) return { verdict: v.verdict, auto: false, note: v.note, pick: v.pick ?? 0 };
+  return item.auto ? { verdict: item.auto, auto: true, pick: 0 } : null;
+}
+
+// Where a line sits along the reference line: the offset that puts its first
+// sample on the reference at the same distance as that point of the reference.
+// Off the reference entirely, tops are aligned when they are close, else starts.
+function offsetAlong(ref, samples) {
+  if (!ref || ref === samples || !ref.length) return 0;
+  for (const s of samples) {
+    let best = Infinity, bestD = 0;
+    for (const r of ref) {
+      const d = metresOf([s[2], s[3]], [r[2], r[3]]);
+      if (d < best) { best = d; bestD = r[0]; }
+    }
+    if (best <= 35) return bestD - s[0];
+  }
+  const rt = ref.at(-1), st = samples.at(-1);
+  return metresOf([rt[2], rt[3]], [st[2], st[3]]) <= 150 ? rt[0] - st[0] : 0;
 }
 
 function drawProgress() {
@@ -134,59 +197,225 @@ function drawProgress() {
   }));
 }
 
-function stat(color, text, dashed) {
-  const row = document.createElement("div"); row.className = "stat";
-  const sw = document.createElement("span"); sw.className = "swatch";
-  sw.style.background = dashed ? `repeating-linear-gradient(90deg, ${color} 0 4px, transparent 4px 7px)` : color;
-  const t = document.createElement("span"); t.textContent = text;
-  row.append(sw, t); return row;
+function node(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
 }
 
-function drawProfile(series) {
+function card(series, extraTags, onPick) {
+  const c = node(onPick ? "button" : "div", "card" + (onPick ? " pickable" : ""));
+  const badge = node("span", "badge" + (series.rest ? " rest" : ""), series.letter ?? "");
+  badge.style.setProperty("--c", series.panelColor);
+  if (!series.letter) badge.style.width = badge.style.height = "14px";
+  const figures = node("span", "figures", series.figures);
+  const tags = node("span", "tags");
+  for (const [text, strong] of extraTags) tags.append(node("span", "tag" + (strong ? " strong" : ""), text));
+  const a = node("a", null, "mapy.com ↗"); a.href = mapyRoute(series.samples); a.target = "_blank"; a.rel = "noopener";
+  a.onclick = (e) => e.stopPropagation();
+  if (series.samples.length > 1) tags.append(a);
+  c.append(badge, figures, tags);
+  c.onmouseenter = () => setHover(series.index);
+  c.onmouseleave = () => setHover(null);
+  if (onPick) c.onclick = onPick;
+  series.card = c;
+  return c;
+}
+
+function buildSeries(item) {
+  const series = [];
+  const ride = item.kind === "ride" ? item.ride : null;
+  if (ride) series.push({ index: "ride", letter: null, samples: ride.samples, mapColor: MAP.ride,
+    panelColor: css("--ride"), label: "your ride",
+    figures: `${km(ride.dist_m)} · ${Math.round(ride.gain_m)} m · cat ${ride.category}` });
+  item.climbs.forEach((c, i) => {
+    const rest = i >= 2;
+    series.push({ index: i, letter: LETTERS[i], rest, climb: c, samples: c.samples,
+      mapColor: [MAP.a, MAP.b][i] ?? MAP.rest, panelColor: [css("--alt-a"), css("--alt-b")][i] ?? css("--alt-rest"),
+      label: LETTERS[i],
+      figures: `${km(c.dist_m)} · ${Math.round(c.gain_m)} m · cat ${c.category ?? "–"} · ${c.avg_grade_pct.toFixed(1)} % avg · ${c.max_grade_pct.toFixed(1)} % max` });
+  });
+  const ref = series[0]?.samples;
+  for (const s of series) s.offset = offsetAlong(ref, s.samples);
+  return series;
+}
+
+function drawMap() {
+  layers.clearLayers();
+  const bounds = [];
+  const stacked = {};
+  // Badges at one spot fan out sideways rather than hiding each other.
+  const badgeAt = (latlng, html, cls, color = "") => {
+    const key = latlng.map((v) => v.toFixed(4)).join();
+    const n = (stacked[key] = (stacked[key] ?? -1) + 1);
+    return L.marker(latlng, { icon: L.divIcon({ className: "",
+      html: `<div class="${cls}" style="--c:${color}">${html}</div>`,
+      iconSize: null, iconAnchor: [11 - n * 24, 11] }), keyboard: false });
+  };
+  // The ride is a wide translucent band underneath, so a database climb on the
+  // same road stays visible inside it rather than being covered by it.
+  for (const s of view.series) {
+    const ll = s.samples.map((p) => [p[2], p[3]]);
+    if (ll.length < 2) continue;
+    const ride = s.index === "ride";
+    s.casing = L.polyline(ll, { color: "#fff", weight: ride ? 0 : 9, opacity: ride ? 0 : 0.85 }).addTo(layers);
+    s.line = L.polyline(ll, { color: s.mapColor, weight: ride ? 14 : 5, opacity: ride ? 0.55 : 1,
+      lineCap: "round", dashArray: s.rest ? "8 7" : null }).addTo(layers);
+    for (const l of [s.casing, s.line]) {
+      l.on("mouseover", () => setHover(s.index));
+      l.on("mouseout", () => setHover(null));
+      if (s.index !== "ride" && view.pickable) l.on("click", () => setPick(s.index));
+    }
+    bounds.push(...ll);
+  }
+  for (const s of view.series) {
+    if (s.samples.length < 1) continue;
+    const first = s.samples[0], last = s.samples.at(-1);
+    if (s.index === "ride") {
+      badgeAt([first[2], first[3]], "your start", "map-pill").addTo(layers);
+      badgeAt([last[2], last[3]], "your top", "map-pill").addTo(layers);
+    } else {
+      L.circleMarker([first[2], first[3]], { radius: 5, color: "#fff", weight: 2, fillColor: s.mapColor, fillOpacity: 1 })
+        .bindTooltip(`${s.letter} start`).addTo(layers);
+      const m = badgeAt([last[2], last[3]], s.letter, "map-badge" + (s.rest ? " rest" : ""), s.mapColor);
+      m.on("mouseover", () => setHover(s.index)).on("mouseout", () => setHover(null));
+      if (view.pickable) m.on("click", () => setPick(s.index));
+      m.addTo(layers);
+      bounds.push([last[2], last[3]]);
+    }
+  }
+  view.cursor = L.circleMarker([0, 0], { radius: 6, color: "#0b0b0b", weight: 2, fillColor: "#fff", fillOpacity: 1 });
+  if (bounds.length) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 16 });
+}
+
+function styleLayers() {
+  const { hover, pick, pickable } = view;
+  for (const s of view.series) {
+    if (!s.line) continue;
+    const focused = hover === s.index;
+    const dimmed = hover !== null && !focused && s.index !== "ride";
+    const picked = pickable && s.index === pick;
+    if (s.index === "ride") {
+      s.line.setStyle({ weight: focused ? 18 : 14, opacity: focused ? 0.75 : 0.55 });
+    } else {
+      const weight = (picked ? 6 : 4) + (focused ? 2 : 0);
+      s.line.setStyle({ weight, opacity: dimmed ? 0.3 : 1 });
+      s.casing.setStyle({ weight: weight + 4, opacity: dimmed ? 0.25 : 0.85 });
+    }
+    if (s.card) s.card.classList.toggle("hover", focused);
+    if (s.card) s.card.classList.toggle("picked", picked);
+    if (s.path) {
+      const band = s.index === "ride";
+      s.path.setAttribute("stroke-width", band ? (focused ? 9 : 7) : focused ? 3.5 : 2);
+      s.path.setAttribute("opacity", band ? (focused ? 0.6 : 0.4) : dimmed ? 0.3 : 1);
+    }
+  }
+  // Stacking, bottom to top: the ride band, the rest, B, A, the picked climb, the hovered line.
+  const raise = (s) => { s?.casing?.bringToFront(); s?.line?.bringToFront(); };
+  for (const s of [...view.series].reverse()) if (s.index !== "ride") raise(s);
+  if (pickable) raise(view.series.find((s) => s.index === pick));
+  if (hover !== null && hover !== "ride") raise(view.series.find((s) => s.index === hover));
+}
+
+function drawProfile() {
   const svg = $("profile");
-  const w = svg.clientWidth, h = svg.clientHeight, pad = { l: 44, r: 12, t: 12, b: 22 };
-  const all = series.flatMap((s) => s.samples);
+  const w = svg.clientWidth, h = svg.clientHeight, pad = { l: 48, r: 28, t: 14, b: 24 };
   svg.replaceChildren();
-  if (!all.length) return;
-  const maxD = Math.max(...series.map((s) => s.samples.at(-1)?.[0] ?? 0)) || 1;
-  const eles = all.map((s) => s[1]).filter(Number.isFinite);
+  const drawn = view.series.filter((s) => s.samples.length > 1);
+  if (!drawn.length) return;
+  const x0 = Math.min(...drawn.map((s) => s.samples[0][0] + s.offset));
+  const x1 = Math.max(...drawn.map((s) => s.samples.at(-1)[0] + s.offset));
+  const eles = drawn.flatMap((s) => s.samples.map((p) => p[1])).filter(Number.isFinite);
   const lo = Math.min(...eles), hi = Math.max(...eles), span = Math.max(hi - lo, 20);
-  const x = (d) => pad.l + (w - pad.l - pad.r) * d / maxD;
+  const x = (d) => pad.l + (w - pad.l - pad.r) * (d - x0) / Math.max(x1 - x0, 1);
   const y = (e) => h - pad.b - (h - pad.t - pad.b) * (e - lo) / span;
   const ns = "http://www.w3.org/2000/svg";
-  const el = (tag, attrs) => { const n = document.createElementNS(ns, tag);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); svg.append(n); return n; };
+  const el = (tag, attrs, parent = svg) => { const n = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); parent.append(n); return n; };
   for (let i = 0; i <= 3; i++) {
     const e = lo + span * i / 3;
     el("line", { x1: pad.l, x2: w - pad.r, y1: y(e), y2: y(e), stroke: css("--line") });
     el("text", { x: pad.l - 6, y: y(e) + 4, "text-anchor": "end", "font-size": 11, fill: css("--muted") })
       .textContent = Math.round(e) + " m";
   }
-  el("text", { x: w - pad.r, y: h - 6, "text-anchor": "end", "font-size": 11, fill: css("--muted") })
-    .textContent = km(maxD);
-  for (const s of series) {
-    const pts = s.samples.filter((p) => Number.isFinite(p[1])).map((p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`);
-    if (pts.length > 1) el("polyline", { points: pts.join(" "), fill: "none", stroke: s.color,
-      "stroke-width": 2, "stroke-dasharray": s.dashed ? "5 4" : "" });
+  el("line", { x1: pad.l, x2: w - pad.r, y1: h - pad.b, y2: h - pad.b, stroke: css("--axis") });
+  el("text", { x: pad.l, y: h - 6, "font-size": 11, fill: css("--muted") }).textContent = km(x0);
+  el("text", { x: w - pad.r, y: h - 6, "text-anchor": "end", "font-size": 11, fill: css("--muted") }).textContent = km(x1);
+  // The ride first, as a band; then the rest, B and A, so A draws on top.
+  const ordered = [...drawn.filter((s) => s.index === "ride"), ...drawn.filter((s) => s.index !== "ride").reverse()];
+  for (const s of ordered) {
+    const pts = s.samples.filter((p) => Number.isFinite(p[1]))
+      .map((p) => `${x(p[0] + s.offset).toFixed(1)},${y(p[1]).toFixed(1)}`);
+    s.path = el("polyline", { points: pts.join(" "), fill: "none", stroke: s.panelColor, "stroke-width": 2,
+      "stroke-linejoin": "round", "stroke-dasharray": s.rest ? "5 4" : "" });
+    if (s.letter) {
+      // A direct label at the line's top, in text ink beside the line's colour.
+      const last = s.samples.at(-1);
+      const g = el("g", { transform: `translate(${x(last[0] + s.offset)},${y(last[1])})` });
+      el("circle", { r: 8, fill: s.rest ? css("--panel") : s.panelColor, stroke: s.rest ? s.panelColor : css("--panel"),
+        "stroke-width": 2, "stroke-dasharray": s.rest ? "3 2" : "" }, g);
+      el("text", { y: 4, "text-anchor": "middle", "font-size": 10, "font-weight": 700,
+        fill: s.rest ? css("--ink") : "#fff" }, g).textContent = s.letter;
+    }
   }
+  const cross = el("line", { y1: pad.t, y2: h - pad.b, stroke: css("--ink-2"), "stroke-dasharray": "3 3", opacity: 0 });
+  const hit = el("rect", { x: pad.l, y: 0, width: Math.max(w - pad.l - pad.r, 0), height: h, fill: "transparent" });
+  const readout = $("readout");
+  const at = (s, d) => {
+    const p = s.samples, t = d - s.offset;
+    if (t < p[0][0] || t > p.at(-1)[0]) return null;
+    let i = 1; while (i < p.length - 1 && p[i][0] < t) i++;
+    const a = p[i - 1], b = p[i], f = (t - a[0]) / Math.max(b[0] - a[0], 1e-9);
+    return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f];
+  };
+  hit.addEventListener("mousemove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const d = x0 + (px - pad.l) / Math.max(w - pad.l - pad.r, 1) * (x1 - x0);
+    cross.setAttribute("x1", px); cross.setAttribute("x2", px); cross.setAttribute("opacity", 1);
+    const rows = [];
+    let point = null;
+    for (const s of drawn) {
+      const v = at(s, d);
+      if (!v) continue;
+      point ??= v;
+      const row = node("div");
+      const sw = node("span", "badge" + (s.rest ? " rest" : ""), s.letter ?? "");
+      sw.style.cssText = `--c:${s.panelColor};width:16px;height:16px;font-size:10px;border-width:1px`;
+      row.append(sw, node("span", null, `${s.label} ${Math.round(v[0])} m`));
+      rows.push(row);
+    }
+    readout.replaceChildren(node("div", "muted", km(d)), ...rows);
+    readout.style.display = rows.length ? "block" : "none";
+    readout.style.left = Math.min(px + 12, w - readout.offsetWidth - 4) + "px";
+    readout.style.top = "8px";
+    if (point) view.cursor.setLatLng([point[1], point[2]]).addTo(layers); else view.cursor.remove();
+  });
+  hit.addEventListener("mouseleave", () => {
+    cross.setAttribute("opacity", 0); readout.style.display = "none"; view.cursor.remove();
+  });
 }
 
-function drawMap(series, markers) {
-  layers.clearLayers();
-  const bounds = [];
-  for (const s of series) {
-    const ll = s.samples.map((p) => [p[2], p[3]]);
-    if (ll.length < 2) continue;
-    L.polyline(ll, { color: "#fff", weight: s.weight + 4, opacity: 0.8 }).addTo(layers);
-    L.polyline(ll, { color: s.color, weight: s.weight, dashArray: s.dashed ? "8 6" : null }).addTo(layers);
-    bounds.push(...ll);
-  }
-  for (const m of markers) {
-    L.circleMarker(m.at, { radius: 6, color: "#fff", weight: 2, fillColor: m.color, fillOpacity: 1 })
-      .bindTooltip(m.label).addTo(layers);
-    bounds.push(m.at);
-  }
-  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+function setHover(index) { if (view.hover !== index) { view.hover = index; styleLayers(); } }
+function setPick(index) {
+  if (!view.pickable || index == null || index >= view.item.climbs.length) return;
+  view.pick = index; styleLayers(); drawChoices();
+}
+
+function drawChoices() {
+  const { item, pick } = view;
+  const d = decision(item);
+  $("choices").replaceChildren(...item.choices.map(([value, label], i) => {
+    const b = node("button", "choice" + (d?.verdict === value ? " chosen" + (d.auto ? " auto" : "") : ""));
+    let text = label;
+    if (view.pickable && ["found", "bounds"].includes(value)) text = label.replace("the selected climb", `climb ${LETTERS[pick]}`);
+    if (d?.verdict === value && d.auto) text += " (decided by the match)";
+    const k = node("kbd", null, i + 1);
+    b.append(k, node("span", null, text));
+    b.onclick = () => choose(value);
+    return b;
+  }));
 }
 
 function render() {
@@ -194,46 +423,26 @@ function render() {
   const d = decision(item);
   $("title").textContent = `${at + 1} / ${queue.items.length} · ${item.bucket}`;
   $("why").textContent = item.why;
+  view = { item, series: buildSeries(item), hover: null,
+    pickable: item.kind === "ride" && item.climbs.length > 0,
+    pick: Math.min(d?.pick ?? 0, Math.max(item.climbs.length - 1, 0)) };
 
-  const climb = css("--climb"), second = css("--second"), ride = css("--ride");
-  const series = [], markers = [], stats = [], links = [];
-  if (item.kind === "ride") {
-    const r = item.ride;
-    series.push({ samples: r.samples, color: ride, weight: 6 });
-    markers.push({ at: r.start, color: ride, label: "ride start" }, { at: r.top, color: ride, label: "ride top" });
-    stats.push(stat(ride, `${r.name} · ${r.date} · ride: ${km(r.dist_m)}, ${Math.round(r.gain_m)} m, cat ${r.category}`));
-    item.climbs.forEach((c, i) => {
-      series.push({ samples: c.samples, color: climb, weight: i ? 3 : 4, dashed: i > 0 });
-      const resolves = !i && ["agrees", "resolves"].includes(item.match);
-      stats.push(stat(climb, `${resolves ? "resolves to" : "nearby"}: ${km(c.dist_m)}, ${Math.round(c.gain_m)} m, cat ${c.category ?? "–"} · ${grade(c)}`, i > 0));
-    });
-    if (r.samples.length > 1) links.push(["Ride on mapy.com", mapyRoute(r.samples)]);
-    if (!item.climbs.length) stats.push(stat(css("--muted"), "no database climb near the top"));
-  } else {
-    item.climbs.forEach((c, i) => {
-      const color = i ? second : climb;
-      series.push({ samples: c.samples, color, weight: 5, dashed: i > 0 });
-      markers.push({ at: c.start, color, label: "start" }, { at: c.top, color, label: "top" });
-      const extra = c.structures.length ? ` · ${c.structures.join(", ")}` : "";
-      stats.push(stat(color, `#${c.climb_id}: ${km(c.dist_m)}, ${Math.round(c.gain_m)} m, cat ${c.category ?? "–"} · ${grade(c)}${extra}`, i > 0));
-      links.push([i ? "Second on mapy.com" : "On mapy.com", mapyRoute(c.samples)]);
-    });
-  }
-  drawMap(series, markers);
-  drawProfile(series);
-  $("stats").replaceChildren(...stats);
-  $("links").replaceChildren(...links.map(([text, href]) => {
-    const a = document.createElement("a"); a.textContent = text; a.href = href; a.target = "_blank"; a.rel = "noopener";
-    return a;
+  const ride = view.series.find((s) => s.index === "ride");
+  $("ride-head").hidden = $("ride").hidden = !ride;
+  if (ride) $("ride").replaceChildren(card(ride, [[`${item.ride.name} · ${item.ride.date}`, false]]));
+  $("alt-head").textContent = item.kind === "ride"
+    ? (item.climbs.length ? "In the database — select the one you mean" : "In the database — nothing near either end")
+    : item.kind === "pair" ? "The pair — is B the same climb as A?" : "The climb";
+  $("alts").replaceChildren(...view.series.filter((s) => s.index !== "ride").map((s) => {
+    const tags = (s.climb.relation?.tags ?? []).map((t) => [t, t === "resolves" || t.startsWith("passes")]);
+    for (const k of s.climb.structures) tags.push([k, false]);
+    return card(s, tags, view.pickable ? () => setPick(s.index) : null);
   }));
-  $("choices").replaceChildren(...item.choices.map(([value, label], i) => {
-    const b = document.createElement("button");
-    b.className = "choice" + (d?.verdict === value ? " chosen" + (d.auto ? " auto" : "") : "");
-    const k = document.createElement("kbd"); k.textContent = i + 1;
-    const t = document.createElement("span"); t.textContent = label + (d?.verdict === value && d.auto ? " (decided by the match)" : "");
-    b.append(k, t); b.onclick = () => choose(value);
-    return b;
-  }));
+
+  drawMap();
+  drawProfile();
+  styleLayers();
+  drawChoices();
   $("note").value = d?.note ?? "";
   $("status").textContent = ""; $("status").className = "status";
   drawProgress();
@@ -243,9 +452,11 @@ function render() {
 
 async function choose(verdict) {
   const item = queue.items[at];
+  const body = { id: item.id, verdict, note: $("note").value };
+  if (view.pickable) body.pick = view.pick;
   try {
     const res = await fetch("/verdict", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: item.id, verdict, note: $("note").value }) });
+      body: JSON.stringify(body) });
     if (!res.ok) throw new Error(await res.text());
     verdicts[item.id] = await res.json();
     go(at + 1);
@@ -262,17 +473,19 @@ function nextUndecided() {
 }
 
 document.addEventListener("keydown", (e) => {
-  if (e.target === $("note")) return;
+  if (e.target === $("note") || e.metaKey || e.ctrlKey || e.altKey) return;
   const item = queue?.items[at]; if (!item) return;
   if (e.key === "ArrowRight") go(at + 1);
   else if (e.key === "ArrowLeft") go(at - 1);
   else if (e.key === "n") nextUndecided();
+  else if (/^[a-f]$/.test(e.key)) setPick(LETTERS.indexOf(e.key.toUpperCase()));
   else if (/^[1-9]$/.test(e.key) && item.choices[+e.key - 1]) choose(item.choices[+e.key - 1][0]);
 });
 $("prev").onclick = () => go(at - 1);
 $("next").onclick = () => go(at + 1);
 $("todo").onclick = nextUndecided;
-addEventListener("resize", () => queue && render());
+let resizing;
+addEventListener("resize", () => { clearTimeout(resizing); resizing = setTimeout(() => view && (drawProfile(), styleLayers()), 150); });
 addEventListener("hashchange", () => { const i = +location.hash.slice(1) - 1; if (queue && i >= 0 && i !== at) go(i); });
 
 (async () => {

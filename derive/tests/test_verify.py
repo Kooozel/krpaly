@@ -152,7 +152,7 @@ def a_ride(**overrides) -> dict:
     ],
 )
 def test_a_ride_resolves_as_the_extension_would(ride: dict, outcome: str) -> None:
-    index = verify.TopIndex([a_climb(0)])
+    index = verify.EndIndex([a_climb(0)])
 
     got, best = verify.match_ride(ride, index)
 
@@ -180,6 +180,48 @@ def test_an_end_is_covered_only_near_a_profile_sample() -> None:
     assert not verify.covered(cells, 49.504, 18.5)
 
 
+def line_of(row: dict) -> np.ndarray:
+    """A straight profile from a climb's start to its top, 10 m a sample."""
+    n = max(int(row["dist_m"] // 10), 1) + 1
+    return np.column_stack(
+        [
+            np.linspace(0, row["dist_m"], n),
+            np.linspace(300, 300 + row["gain_m"], n),
+            np.linspace(row["start_lat"], row["top_lat"], n),
+            np.linspace(row["start_lon"], row["top_lon"], n),
+        ]
+    )
+
+
+def test_a_climb_running_on_past_the_rides_top_says_how_far() -> None:
+    ride = a_ride(top_lat=49.5 + 600 * DEG_PER_M)
+    climb = a_climb(0)
+
+    got = verify.relation(ride, climb, line_of(climb))
+
+    assert not got["resolves"] and got["passes"]
+    assert got["tags"] == ["start 0 m away", "passes your top, goes on 400 m"]
+
+
+def test_alternatives_lead_with_the_match_then_what_passes_and_fold_twins() -> None:
+    ride = a_ride(top_lat=49.5 + 600 * DEG_PER_M)
+    overrun = a_climb(0)
+    twin = a_climb(1, way_refs=[100, 900], dist_m=1020.0)
+    # Starts where the ride does and turns off east before its top.
+    elsewhere = a_climb(2, top_lat=49.5 + 300 * DEG_PER_M, top_lon=18.503, dist_m=380.0)
+    # Resolves: tops out at the ride's top.
+    resolving = a_climb(3, top_lat=ride["top_lat"], dist_m=600.0)
+    rows = [overrun, twin, elsewhere, resolving]
+    tops, starts = verify.EndIndex(rows), verify.EndIndex(rows, end="start")
+
+    got = verify.alternatives(ride, tops, starts, line_of, None)
+
+    assert [row["climb_id"] for row, _ in got] == [3, 0, 2]
+    assert got[1][1]["tags"][-1] == "+1 near-identical"
+    led = verify.alternatives(ride, tops, starts, line_of, elsewhere)
+    assert led[0][0]["climb_id"] == 2
+
+
 # --- verdicts and the golden set ---------------------------------------------
 
 
@@ -200,12 +242,12 @@ def test_verdicts_become_road_facts_and_nothing_about_the_ride() -> None:
     kept, rejected, first, second, found = (climb_json(i) for i in range(5))
     ride = {"start": [49.5, 18.5], "top": [49.51, 18.5], "dist_m": 1000.4, "gain_m": 60.2}
     decisions = [
-        ({"kind": "climb", "climbs": [kept]}, "climb", ""),
-        ({"kind": "climb", "climbs": [rejected]}, "bad_profile", ""),
-        ({"kind": "climb", "climbs": [climb_json(9)]}, "unsure", ""),
-        ({"kind": "pair", "climbs": [first, second]}, "duplicate", ""),
-        ({"kind": "ride", "climbs": [found], "ride": ride}, "found", ""),
-        ({"kind": "ride", "climbs": [], "ride": ride | {"name": "x"}}, "missing", ""),
+        ({"kind": "climb", "climbs": [kept]}, "climb", 0),
+        ({"kind": "climb", "climbs": [rejected]}, "bad_profile", 0),
+        ({"kind": "climb", "climbs": [climb_json(9)]}, "unsure", 0),
+        ({"kind": "pair", "climbs": [first, second]}, "duplicate", 0),
+        ({"kind": "ride", "climbs": [found], "ride": ride}, "found", 0),
+        ({"kind": "ride", "climbs": [], "ride": ride | {"name": "x"}}, "missing", 0),
     ]
 
     entries = verify.golden_entries(decisions)
@@ -220,11 +262,23 @@ def test_verdicts_become_road_facts_and_nothing_about_the_ride() -> None:
     assert "name" not in json.dumps(entries)
 
 
+def test_a_ride_verdict_is_about_the_climb_that_was_picked() -> None:
+    first, second = climb_json(0), climb_json(1)
+    ride = {"start": [49.5, 18.5], "top": [49.51, 18.5], "dist_m": 1000.0, "gain_m": 60.0}
+
+    [entry] = verify.golden_entries(
+        [({"kind": "ride", "climbs": [first, second], "ride": ride}, "bounds", 1)]
+    )
+
+    assert entry["anchor"]["way_refs"] == [101]
+    assert (entry["verdict"], entry["reason"]) == ("reject", "bounds")
+
+
 def test_a_later_verdict_on_the_same_anchor_replaces_the_earlier_one() -> None:
     climb = climb_json(0)
     decisions = [
-        ({"kind": "climb", "climbs": [climb]}, "climb", ""),
-        ({"kind": "climb", "climbs": [climb]}, "wrong_road", ""),
+        ({"kind": "climb", "climbs": [climb]}, "climb", 0),
+        ({"kind": "climb", "climbs": [climb]}, "wrong_road", 0),
     ]
 
     [entry] = verify.golden_entries(decisions)
@@ -238,11 +292,11 @@ def test_precision_weights_strata_by_size_and_names_the_ones_not_reviewed() -> N
     def random_item(stratum: str) -> dict:
         return {"bucket": "random", "stratum": stratum}
 
-    decisions = [(random_item("4"), "climb", "")] * 4 + [
-        (random_item("null"), "not_climb", ""),
-        (random_item("null"), "climb", ""),
-        (random_item("null"), "unsure", ""),
-        ({"bucket": "steep", "stratum": None}, "not_climb", ""),
+    decisions = [(random_item("4"), "climb", 0)] * 4 + [
+        (random_item("null"), "not_climb", 0),
+        (random_item("null"), "climb", 0),
+        (random_item("null"), "unsure", 0),
+        ({"bucket": "steep", "stratum": None}, "not_climb", 0),
     ]
 
     got = verify.precision(queue, decisions)
@@ -254,7 +308,7 @@ def test_precision_weights_strata_by_size_and_names_the_ones_not_reviewed() -> N
 
 def test_an_all_real_sample_still_carries_a_margin() -> None:
     queue = {"strata": {"4": 300}}
-    decisions = [({"bucket": "random", "stratum": "4"}, "climb", "")] * 15
+    decisions = [({"bucket": "random", "stratum": "4"}, "climb", 0)] * 15
 
     got = verify.precision(queue, decisions)
 
@@ -437,6 +491,8 @@ def test_a_verdict_posted_to_the_page_comes_out_of_accept_as_a_road_fact(
     assert post(url, {"id": "ride:7:1", "verdict": "missing", "note": "the old road"}) == 200
     assert post(url, {"id": "ride:7:1", "verdict": "sideways"}) == 400
     assert post(url, {"id": "nothing", "verdict": "climb"}) == 400
+    climbs = len(next(i for i in queue["items"] if i["id"] == "ride:7:0")["climbs"])
+    assert post(url, {"id": "ride:7:0", "verdict": "found", "pick": climbs}) == 400
     with urllib.request.urlopen(url + "/verdicts.json") as response:
         assert json.load(response)["ride:7:1"]["note"] == "the old road"
 

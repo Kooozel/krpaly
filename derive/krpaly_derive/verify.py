@@ -77,9 +77,14 @@ START_M = 250.0
 # this fraction. GPS and barometer against DMR 5G agree to a few per cent on
 # the rows that match at all; a fifth is a different climb, not noise.
 RIDE_AGREEMENT = 0.2
-# How far around a ride's top the page draws database climbs for comparison.
+# How far around either end of a ride the page looks for database climbs to
+# draw beside it, and how many it draws. Both ends, because the two ways a ride
+# misses are a database climb that shares its start and runs past its top, and
+# two database climbs that share its start and its top between them.
 RIDE_NEARBY_M = 400.0
-RIDE_NEARBY_MAX = 5
+RIDE_NEARBY_MAX = 6
+# A database climb passes a ride's top when a sample of it lies this close.
+PASSES_M = 60.0
 # A ride end is on derived roads when a profile sample lies in its cell or a
 # neighbour: 0.001° is ~110 m of latitude and ~72 m of longitude here.
 COVERAGE_CELL_DEG = 0.001
@@ -122,8 +127,8 @@ PAIR_CHOICES = (
     ("unsure", "Not sure — skip"),
 )
 RIDE_CHOICES = (
-    ("found", "The database has it (one of the blue lines)"),
-    ("bounds", "The database has it, but starts or ends wrong"),
+    ("found", "The database has it — the selected climb"),
+    ("bounds", "The database has it — the selected climb, but it starts or ends wrong"),
     ("missing", "The database misses a road climb"),
     ("offroad", "The ride was off-road — not a road climb"),
     ("artefact", "A GPS or barometer artefact, not a climb"),
@@ -156,36 +161,40 @@ def anchor_id(anchor: tuple) -> str:
     return f"{start}-{end}-{digest}"
 
 
-class TopIndex:
-    """Climbs bucketed by the cell their top is in, for radius lookups."""
+class EndIndex:
+    """Climbs bucketed by the cell one of their ends is in, for radius lookups."""
 
     # Cells per degree. 0.01° is ~720 m of longitude at Czech latitudes, so one
     # ring of neighbours covers every radius asked of it here.
     CELL = 100
 
-    def __init__(self, rows: Iterable[Mapping]):
+    def __init__(self, rows: Iterable[Mapping], end: str = "top"):
+        self.lat, self.lon = f"{end}_lat", f"{end}_lon"
         self.cells: dict[tuple[int, int], list[Mapping]] = defaultdict(list)
         for row in rows:
-            self.cells[self.cell(row["top_lat"], row["top_lon"])].append(row)
+            self.cells[self.cell(row[self.lat], row[self.lon])].append(row)
 
     def cell(self, lat: float, lon: float) -> tuple[int, int]:
         return math.floor(lat * self.CELL), math.floor(lon * self.CELL)
 
-    def near_top(self, lat: float, lon: float, radius_m: float) -> list[Mapping]:
+    def near(self, lat: float, lon: float, radius_m: float) -> list[Mapping]:
         ci, cj = self.cell(lat, lon)
         return [
             row
             for i in (-1, 0, 1)
             for j in (-1, 0, 1)
             for row in self.cells.get((ci + i, cj + j), ())
-            if metres(lat, lon, row["top_lat"], row["top_lon"]) <= radius_m
+            if metres(lat, lon, row[self.lat], row[self.lon]) <= radius_m
         ]
 
     def resolve(self, start: Sequence[float], top: Sequence[float]) -> list[Mapping]:
-        """What the resolution API would answer: top within TOP_M, start within START_M."""
+        """What the resolution API would answer: top within TOP_M, start within START_M.
+
+        Asked of an index on tops.
+        """
         return [
             row
-            for row in self.near_top(*top, TOP_M)
+            for row in self.near(*top, TOP_M)
             if metres(*start, row["start_lat"], row["start_lon"]) <= START_M
         ]
 
@@ -223,20 +232,25 @@ def flags_of(row: Mapping, samples: np.ndarray, structures: Mapping[int, str]) -
     return flags
 
 
+def same_climb(a: Mapping, b: Mapping) -> bool:
+    """Two anchors a rider would call one climb: the same ends, the same length."""
+    return (
+        metres(a["top_lat"], a["top_lon"], b["top_lat"], b["top_lon"]) <= DUPLICATE_TOP_M
+        and metres(a["start_lat"], a["start_lon"], b["start_lat"], b["start_lon"])
+        <= DUPLICATE_START_M
+        and within(b["dist_m"], a["dist_m"], DUPLICATE_DIST_RATIO)
+    )
+
+
 def duplicate_pairs(rows: Sequence[Mapping]) -> list[tuple[Mapping, Mapping]]:
     """Pairs of distinct anchors a rider would call one climb, stronger first."""
-    index = TopIndex(rows)
+    index = EndIndex(rows)
     pairs = []
     for row in rows:
-        for other in index.near_top(row["top_lat"], row["top_lon"], DUPLICATE_TOP_M):
+        for other in index.near(row["top_lat"], row["top_lon"], DUPLICATE_TOP_M):
             if other["climb_id"] <= row["climb_id"]:
                 continue
-            start_gap = metres(
-                row["start_lat"], row["start_lon"], other["start_lat"], other["start_lon"]
-            )
-            if start_gap <= DUPLICATE_START_M and within(
-                other["dist_m"], row["dist_m"], DUPLICATE_DIST_RATIO
-            ):
+            if same_climb(row, other):
                 first, second = sorted((row, other), key=lambda r: (-r["gain_m"], r["climb_id"]))
                 pairs.append((first, second))
     return pairs
@@ -333,7 +347,7 @@ def covered(cells: set[tuple[int, int]], lat: float, lon: float) -> bool:
     return any((ci + i, cj + j) in cells for i in (-1, 0, 1) for j in (-1, 0, 1))
 
 
-def match_ride(ride: Mapping, index: TopIndex) -> tuple[str, Mapping | None]:
+def match_ride(ride: Mapping, index: EndIndex) -> tuple[str, Mapping | None]:
     """How a ridden climb resolves: `agrees`, `resolves`, `top`, or `none`, and to what.
 
     `agrees` is `resolves` with distance and gain inside RIDE_AGREEMENT, and is
@@ -347,22 +361,79 @@ def match_ride(ride: Mapping, index: TopIndex) -> tuple[str, Mapping | None]:
             best["gain_m"], ride["elevation_m"], RIDE_AGREEMENT
         )
         return ("agrees" if agrees else "resolves"), best
-    tops = index.near_top(*top, TOP_M)
+    tops = index.near(*top, TOP_M)
     if tops:
         return "top", min(tops, key=lambda r: metres(*start, r["start_lat"], r["start_lon"]))
     return "none", None
 
 
-def nearby(ride: Mapping, index: TopIndex, best: Mapping | None) -> list[Mapping]:
-    """The database climbs worth drawing beside a ride, the best match first."""
-    start = (ride["start_lat"], ride["start_lon"])
-    around = sorted(
-        index.near_top(ride["top_lat"], ride["top_lon"], RIDE_NEARBY_M),
-        key=lambda r: metres(*start, r["start_lat"], r["start_lon"]),
+def relation(ride: Mapping, row: Mapping, samples: np.ndarray) -> dict:
+    """How one database climb sits against a ride, in the terms a reviewer reads."""
+    start_m = metres(ride["start_lat"], ride["start_lon"], row["start_lat"], row["start_lon"])
+    top_m = metres(ride["top_lat"], ride["top_lon"], row["top_lat"], row["top_lon"])
+    scale = math.cos(math.radians(ride["top_lat"]))
+    to_top = (
+        np.hypot(samples[:, 2] - ride["top_lat"], (samples[:, 3] - ride["top_lon"]) * scale)
+        * 111_195
     )
-    if best is not None:
-        around = [best] + [r for r in around if r["climb_id"] != best["climb_id"]]
-    return around[:RIDE_NEARBY_MAX]
+    nearest = int(np.argmin(to_top))
+    tags = []
+    if top_m <= TOP_M and start_m <= START_M:
+        tags.append("resolves")
+    else:
+        tags.append(f"start {start_m:.0f} m away")
+        if top_m > TOP_M and to_top[nearest] <= PASSES_M:
+            tags.append(f"passes your top, goes on {samples[-1, 0] - samples[nearest, 0]:.0f} m")
+        else:
+            tags.append(f"top {top_m:.0f} m away")
+    return {
+        "resolves": tags[0] == "resolves",
+        "passes": any(t.startswith("passes") for t in tags),
+        "start_m": round(start_m),
+        "top_m": round(top_m),
+        "tags": tags,
+    }
+
+
+def alternatives(
+    ride: Mapping, tops: EndIndex, starts: EndIndex, samples_of, best: Mapping | None
+) -> list[tuple[Mapping, dict]]:
+    """The database climbs worth drawing beside a ride, most telling first.
+
+    `match_ride`'s best match, then whatever else resolves, then what passes
+    the ride's top, then the rest by how far their two ends are from the
+    ride's. The best match leads because a queued `found` is about the first.
+    """
+    found = {
+        row["climb_id"]: row
+        for row in (
+            *tops.near(ride["top_lat"], ride["top_lon"], RIDE_NEARBY_M),
+            *starts.near(ride["start_lat"], ride["start_lon"], RIDE_NEARBY_M),
+        )
+    }
+    related = [(row, relation(ride, row, samples_of(row))) for row in found.values()]
+    related.sort(
+        key=lambda pair: (
+            best is None or pair[0]["climb_id"] != best["climb_id"],
+            not pair[1]["resolves"],
+            not pair[1]["passes"],
+            pair[1]["start_m"] + pair[1]["top_m"],
+            pair[0]["climb_id"],
+        )
+    )
+    # A near-duplicate anchor (see `duplicate_pairs`) would take a slot to draw
+    # the same line again, so it is folded into the one before it and counted.
+    kept: list[tuple[Mapping, dict]] = []
+    for row, rel in related:
+        twin = next((k for k in kept if same_climb(k[0], row)), None)
+        if twin is not None:
+            twin[1]["twins"] += 1
+        elif len(kept) < RIDE_NEARBY_MAX:
+            kept.append((row, rel | {"twins": 0}))
+    for _, rel in kept:
+        if rel["twins"]:
+            rel["tags"].append(f"+{rel['twins']} near-identical")
+    return kept
 
 
 # --- the queue ---------------------------------------------------------------
@@ -459,7 +530,8 @@ def build_queue(
 
     ride_counts: Counter = Counter()
     if rides is not None:
-        index = TopIndex(rows)
+        index = EndIndex(rows)
+        starts = EndIndex(rows, end="start")
         cells = coverage_cells(loaded)
         for ride in read_rides(rides):
             if not (
@@ -502,7 +574,14 @@ def build_queue(
                         "samples": thinned(track),
                     },
                     "climbs": [
-                        climb_json(r, samples_of(r), structures) for r in nearby(ride, index, best)
+                        climb_json(r, samples_of(r), structures) | {"relation": rel}
+                        for r, rel in alternatives(
+                            ride,
+                            index,
+                            starts,
+                            samples_of,
+                            best if outcome in ("agrees", "resolves") else None,
+                        )
                     ],
                 }
             )
@@ -594,15 +673,20 @@ def read_verdicts(path: Path) -> dict[str, dict]:
     return latest
 
 
-def decided(queue: Mapping, verdicts: Mapping[str, dict]) -> list[tuple[dict, str, str]]:
-    """Every item with a verdict — a person's, or the queue's own — as (item, verdict, note)."""
+def decided(queue: Mapping, verdicts: Mapping[str, dict]) -> list[tuple[dict, str, int]]:
+    """Every item with a verdict — a person's, or the queue's own — as (item, verdict, pick).
+
+    `pick` is which of the item's climbs the verdict is about. A ride's
+    alternatives are ordered with what resolves first, so the queue's own
+    `found` is about the first.
+    """
     out = []
     for item in queue["items"]:
         given = verdicts.get(item["id"])
         if given is not None:
-            out.append((item, given["verdict"], given.get("note") or ""))
+            out.append((item, given["verdict"], given.get("pick") or 0))
         elif item["auto"] is not None:
-            out.append((item, item["auto"], ""))
+            out.append((item, item["auto"], 0))
     return out
 
 
@@ -618,14 +702,14 @@ def entry(verdict: str, reason: str | None, climb: Mapping) -> dict:
     }
 
 
-def golden_entries(decisions: Iterable[tuple[dict, str, str]]) -> list[dict]:
+def golden_entries(decisions: Iterable[tuple[dict, str, int]]) -> list[dict]:
     """What the verdicts say about roads, one entry per anchor, later verdicts winning.
 
     A `missing` ride has no anchor to name, so it is kept by its ends and its
     figures — rounded, and with nothing about the ride that measured them.
     """
     by_key: dict[object, dict] = {}
-    for item, verdict, _ in decisions:
+    for item, verdict, pick in decisions:
         climbs = item["climbs"]
         if item["kind"] == "climb":
             if verdict == "climb":
@@ -636,10 +720,11 @@ def golden_entries(decisions: Iterable[tuple[dict, str, str]]) -> list[dict]:
             if verdict == "duplicate":
                 by_key[anchor_id_of(climbs[1])] = entry("reject", "duplicate", climbs[1])
         elif item["kind"] == "ride":
-            if verdict == "found" and climbs:
-                by_key[anchor_id_of(climbs[0])] = entry("keep", None, climbs[0])
-            elif verdict == "bounds" and climbs:
-                by_key[anchor_id_of(climbs[0])] = entry("reject", "bounds", climbs[0])
+            picked = climbs[pick] if pick < len(climbs) else None
+            if verdict == "found" and picked:
+                by_key[anchor_id_of(picked)] = entry("keep", None, picked)
+            elif verdict == "bounds" and picked:
+                by_key[anchor_id_of(picked)] = entry("reject", "bounds", picked)
             elif verdict == "missing":
                 ride = item["ride"]
                 key = ("missing", *ride["start"], *ride["top"])
@@ -660,7 +745,7 @@ def anchor_id_of(climb: Mapping) -> str:
     return anchor_id((tuple(a["way_refs"]), a["start_node_id"], a["end_node_id"]))
 
 
-def precision(queue: Mapping, decisions: Iterable[tuple[dict, str, str]]) -> dict | None:
+def precision(queue: Mapping, decisions: Iterable[tuple[dict, str, int]]) -> dict | None:
     """The stratified estimate of how many climbs are real, off the random bucket only.
 
     Each stratum's share is weighted by its size in the derivation. A stratum
@@ -760,7 +845,7 @@ def check_entries(entries: Iterable[Mapping], rows: Sequence[Mapping]) -> list[t
     `still_missing` for climbs a ride proved missing.
     """
     by_anchor = {anchor_of(row): row for row in rows}
-    index = TopIndex(rows)
+    index = EndIndex(rows)
     results = []
     for e in entries:
         anchor = e["anchor"]
@@ -825,6 +910,7 @@ def handler_for(out: Path) -> type[BaseHTTPRequestHandler]:
     review = out / REVIEW_DIR
     queue = read_queue(out)
     choices = {item["id"]: {c[0] for c in item["choices"]} for item in queue["items"]}
+    sizes = {item["id"]: len(item["climbs"]) for item in queue["items"]}
     body = json.dumps(queue, separators=(",", ":")).encode()
 
     class Handler(BaseHTTPRequestHandler):
@@ -856,16 +942,21 @@ def handler_for(out: Path) -> type[BaseHTTPRequestHandler]:
                 posted = json.loads(self.rfile.read(length))
                 item_id, verdict = posted["id"], posted["verdict"]
                 note = str(posted.get("note") or "")[:500]
+                pick = int(posted.get("pick") or 0)
             except (ValueError, KeyError, TypeError):
-                self.send(HTTPStatus.BAD_REQUEST, b"want {id, verdict, note}", "text/plain")
+                self.send(HTTPStatus.BAD_REQUEST, b"want {id, verdict, note, pick}", "text/plain")
                 return
             if verdict not in choices.get(item_id, ()):
                 self.send(HTTPStatus.BAD_REQUEST, b"no such item or verdict", "text/plain")
+                return
+            if not 0 <= pick < max(sizes[item_id], 1):
+                self.send(HTTPStatus.BAD_REQUEST, b"no such climb to pick", "text/plain")
                 return
             line = {
                 "id": item_id,
                 "verdict": verdict,
                 "note": note,
+                "pick": pick,
                 "at": datetime.now(UTC).isoformat(timespec="seconds"),
             }
             with (review / VERDICTS_NAME).open("a") as log:

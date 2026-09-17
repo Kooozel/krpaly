@@ -63,14 +63,14 @@ that touches the database.
 
 **Present: `.gitignore`, `LICENSE`, `README.md`, `CONTRIBUTING.md`, `ATTRIBUTION.md`, `Makefile`,
 `scripts/`, `docs/agents/`, `.github/`; `derive/`, which has its toolchain, `INPUTS.md`, the
-migration runner, the vendored climb-engine build and the first four pipeline stages — OSM
-extraction to candidate polylines, DMR 5G acquisition, elevation sampling into engine-shaped
-profiles, and climb detection through a Node harness — but nothing after them: runs are still one
-candidate each, and there is no anchor dedupe and no loader; `derive/manifests/`, the committed
-record of each stage's manifest for `kraj-1` (`cyclable/v1`) and `kraj-1-v2` (`cyclable/v2`); and `db/`, which has the schema, its migrations and
-`db/README.md`.** Everything below about `web/` is settled intent, not present code
-— it is written down because these are decisions that are expensive to reverse once rows exist, not
-because the code is there to read.
+migration runner, the vendored climb-engine build and all six pipeline stages — OSM extraction to
+candidate polylines, DMR 5G acquisition, elevation sampling into engine-shaped profiles, climb
+detection through a Node harness, anchoring and dedupe, and the load into Postgres;
+`derive/manifests/`, the committed record of each stage's manifest for `kraj-1` (`cyclable/v1`) and
+`kraj-1-v2` (`cyclable/v2`); and `db/`, which has the schema, its migrations and `db/README.md`.**
+Everything below about `web/` is settled intent, not present code — it is written down because
+these are decisions that are expensive to reverse once rows exist, not because the code is there to
+read.
 
 ## Constraints that bind work before it is written
 

@@ -1,0 +1,46 @@
+{
+  "counts": {
+    "by_region": {
+      "CZ071": 2854,
+      "CZ072": 2202,
+      "CZ080": 19222
+    },
+    "climbs": 24358,
+    "degenerate_profiles": 0,
+    "loaded": 24278,
+    "outside_czechia": 80,
+    "profile_points": 2684067
+  },
+  "derivation": {
+    "boundary_assignment": "summit",
+    "boundary_buffer_m": 10000,
+    "boundary_relation_id": 442461,
+    "boundary_relation_version": 267,
+    "dem_crs": 5514,
+    "dem_fetched_at": "2026-09-11T15:36:02+00:00",
+    "dem_manifest_sha256": "fe6934e352580b64bd40ad7cd449abb7eb0b016719a55ef620d75947db35a894",
+    "dem_nodata_value": -9999.0,
+    "dem_product": "ZABAGED\u00ae \u2013 V\u00fd\u0161kopis \u2013 DMR 5G (64111), via the ImageServer 2 m mosaic",
+    "dem_resolution_m": 2,
+    "dem_route": "https://ags.cuzk.gov.cz/arcgis2/rest/services/dmr5g/ImageServer/exportImage",
+    "dem_vertical_crs": 8357,
+    "engine_commit": "9fb96def4e9f9d9a3487c1c4701246ec1c42579d",
+    "engine_config_override": {},
+    "engine_version": "v0.1.0",
+    "osm_snapshot_replication_ts": "2026-09-01T20:20:50Z",
+    "osm_snapshot_seq": 4897,
+    "osm_snapshot_sha256": "c6491be9a32e881779de3676609a9974bc917fde2069ffdd5fae09948be8e527",
+    "osm_snapshot_url": "https://download.geofabrik.de/europe/czech-republic-260901.osm.pbf",
+    "scoring_model": "aso",
+    "structure_version": "structure/v1",
+    "way_filter_version": "cyclable/v2"
+  },
+  "source": {
+    "anchors": "anchors.parquet",
+    "anchors_sha256": "d599c474a50c1d5f191ea331d6c7d49503fb7d1abd76d1f74d3a7830d32836ce",
+    "candidates": "candidates.parquet",
+    "candidates_sha256": "7232589913fb7847fa0aeb1ea0a42cd868d8e475a1f16c9662040bb9589d6afa",
+    "profiles": "profiles.parquet",
+    "profiles_sha256": "8cc77e7d9c87f3426ee2eb455fce36b62f3cfdcba0dedf687d5efe182bf19b74"
+  }
+}

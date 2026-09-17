@@ -56,6 +56,8 @@ PINNED_DERIVATION = {
     "dem_nodata_value": -9999,
     "dem_manifest_sha256": "b" * 64,
     "dem_fetched_at": "2026-09-09T00:00:00Z",
+    "way_filter_version": "cyclable/v2",
+    "structure_version": "structure/v1",
 }
 
 
@@ -70,9 +72,9 @@ def write_pair(directory: Path, stem: str, *, down: bool = True) -> None:
 
 def test_discovers_the_repos_own_migrations():
     migrations = discover()
-    assert [m.version for m in migrations] == ["0001", "0002", "0003", "0004", "0005"]
+    assert [m.version for m in migrations] == ["0001", "0002", "0003", "0004", "0005", "0006"]
     assert migrations[0].name == "postgis"
-    assert migrations[-1].name == "engine_config"
+    assert migrations[-1].name == "way_filter"
 
 
 def test_sorts_by_numeric_prefix_not_lexically(tmp_path):
@@ -190,7 +192,7 @@ def insert_climb(conn, derivation_id: int, **overrides) -> int:
 def test_up_creates_the_schema_on_a_clean_database(migrated):
     # The ticket's first completion criterion.
     assert {"region", "derivation", "climb", "climb_profile"} <= table_names(migrated)
-    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004", "0005"}
+    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004", "0005", "0006"}
 
 
 @REQUIRES_DB
@@ -233,7 +235,7 @@ def test_up_to_a_version_stops_there_padded_or_not(conn, to):
 @REQUIRES_DB
 def test_up_is_idempotent_when_everything_is_applied(migrated):
     apply_up(migrated, discover())
-    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004", "0005"}
+    assert applied_versions(migrated) == {"0001", "0002", "0003", "0004", "0005", "0006"}
 
 
 @REQUIRES_DB
@@ -317,11 +319,15 @@ def test_the_engine_stages_derivation_block_inserts_as_it_stands(migrated):
 
 
 @REQUIRES_DB
-def test_engine_config_override_has_no_default(migrated):
+@pytest.mark.parametrize(
+    "column", ["engine_config_override", "way_filter_version", "structure_version"]
+)
+def test_the_later_provenance_columns_have_no_default(migrated, column):
     # A loader that forgets the column fails, rather than recording "no
-    # override" by accident.
-    without = {k: v for k, v in PINNED_DERIVATION.items() if k != "engine_config_override"}
-    with pytest.raises(psycopg.errors.NotNullViolation):
+    # override" or a plausible filter by accident. Matched on the column, since
+    # any one of them missing raises the same class.
+    without = {k: v for k, v in PINNED_DERIVATION.items() if k != column}
+    with pytest.raises(psycopg.errors.NotNullViolation, match=column):
         insert_row(migrated, "derivation", without)
 
 

@@ -1,7 +1,7 @@
 # `db/` — the schema, and how to run it
 
 Postgres 17 with PostGIS 3.5. Four tables, applied by numbered SQL through a runner that lives in
-[`derive/`](../derive). #6–#9 write into these tables; this file is what they read first.
+[`derive/`](../derive). `krpaly_derive.load` writes into these tables; this file is what it reads first.
 
 Only the part of §06 the first derivation needs is here. `app_user`, `oauth_account`, `ascent` and
 `climb_stats` are designed in the spec and deliberately not created: v1 is climb pages, region
@@ -63,6 +63,8 @@ SQL lint included. CI always sets it, so CI never skips.
 | `0002_region` | `region` and its fourteen-row seed |
 | `0003_derivation` | `derivation` and its provenance scalars |
 | `0004_climb` | `climb`, `climb_profile`, four indexes |
+| `0005_engine_config` | `derivation.engine_config_override` |
+| `0006_way_filter` | `derivation.way_filter_version`, `derivation.structure_version` |
 
 `0001`'s `down` is deliberately empty. Its `up` is `create extension if not exists`, which is a
 no-op on every PostGIS image — the extension is already there — so dropping it would remove
@@ -115,6 +117,9 @@ and queryable, rather than buried in JSON.
 | `dem_nodata_value` | −9999. Exists because a row derived before that parameter was passed is **not comparable** to one derived after: without it, uncovered pixels arrive as `0.0` with nothing in the file to say so, and a candidate crossing them becomes a spectacular fictional climb. |
 | `dem_manifest_sha256` | Points at #7's committed per-window manifest rather than carrying it: the sha256 of `derive/manifests/<run>/dem.manifest.json`, which is the manifest minus `run`, so a re-run that fetched nothing does not move it. |
 | `dem_fetched_at` | When. This route publishes no vintage, so this is the only date there is. |
+| `engine_config_override` | What krpaly changed from the pinned build's `DetectClimbsOptions` defaults, as a JSON object. `{}` is the defaults. |
+| `way_filter_version` | The cyclable-way predicate, e.g. `cyclable/v2`. It moves the climb count harder than the boundary does. |
+| `structure_version` | How bridges and tunnels are profiled, e.g. `structure/v1`. |
 
 There is **no `region_code` on `derivation`**, on purpose. Climbs are assigned to a kraj by their
 summit, so a derivation of Moravskoslezský legitimately produces climbs in Zlínský. The kraj a
@@ -142,17 +147,19 @@ model produced them, and the column sits on `derivation` in the same spirit as `
 | `dist_m` | `MeasuredClimb.distance`. |
 | `gain_m` | `MeasuredClimb.elevation`. |
 | `avg_grade` | Per cent, as the engine gives it. |
-| `max_grade` | Per cent. **The loader converts** — see below. |
+| `max_grade` | Per cent. **Converted upstream**, not by the loader — see below. |
 | `difficulty`, `category` | Both nullable, and null is data: it means the derivation's scoring model cleared no threshold for this climb. `uncategorized` is a category, not an absence. |
 
-### The two conversions the loader owes
+### What the loader owes, and what it no longer does
 
-1. **`max_grade` is `maxSustainedGradient × 100`.** The engine reports `avgGrade` in per cent and
-   `maxSustainedGradient` as a decimal fraction — `0.25` is 25 %. Two grade columns side by side in
-   one row have to agree on their unit, and this schema stores both as per cent.
-2. **`way_refs` is ordered, and the order is the direction of travel.** Approach direction is part
-   of identity: a climb one way is a descent the other, and two sides of one summit are two climbs.
-   Both directions are emitted, and they are two rows with two anchors, not one row with a flag.
+**`way_refs` is ordered, and the order is the direction of travel.** Approach direction is part of
+identity: a climb one way is a descent the other, and two sides of one summit are two climbs. Both
+directions are emitted, and they are two rows with two anchors, not one row with a flag.
+
+**`max_grade` is already per cent when it reaches the loader.** The engine reports `avgGrade` in per
+cent and `maxSustainedGradient` as a decimal fraction — `0.25` is 25 %. `krpaly_derive.detect`
+multiplies by 100 where engine output enters krpaly, and `anchor` carries the column through, so the
+loader copies both grades as they stand. A second conversion there would store 2500 %.
 
 ### The anchor
 

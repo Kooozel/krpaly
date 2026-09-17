@@ -362,6 +362,7 @@ dem_product, dem_route, dem_resolution_m, dem_crs, dem_vertical_crs,
   dem_nodata_value, dem_manifest_sha256, dem_fetched_at
 engine_version, engine_commit                                          (from #1)
 engine_config_override                                                 (from #9)
+way_filter_version, structure_version                                  (from #24, #22)
 ```
 
 `boundary_relation_version` holds the version found in the extract, not the live one.
@@ -371,6 +372,22 @@ is not comparable to one derived after. Per-window checksums stay in #7's commit
 row carries `dem_manifest_sha256`, the sha256 of the committed
 `derive/manifests/<run>/dem.manifest.json` — the manifest minus `run`, so a verification re-run
 does not move it.
+
+`way_filter_version` and `structure_version` are provenance for the same reason the boundary version
+is, and they move the climb count harder: `cyclable/v1` → `v2` admitted plain service roads and
+paved tracks, and `structure/v1` decides whether a bridge is profiled between its ends or along its
+deck. Two derivations that differ only there are otherwise indistinguishable in a query. Both are
+read out of `candidates.manifest.json` → `way_filter`.
+
+### Load
+
+`krpaly_derive.load` fills every column above from the stage manifests — `dem.manifest.json` from
+its committed record, since `dem_manifest_sha256` hashes that file — with one exception: the
+operator passes `--osm-snapshot-url`. No stage observed the URL — extract reads a local `.pbf` and
+never downloads one — so it is typed, and it is the value in [OSM snapshot](#osm-snapshot) verbatim.
+The load refuses a `--pbf` whose sha256 is not `osm_snapshot.sha256`, which is what makes the typed
+URL and the extracted bytes provably the same snapshot; the kraj polygons that climbs are assigned
+against are read from that same file.
 
 ## Engine build
 

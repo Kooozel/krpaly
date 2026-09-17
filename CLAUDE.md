@@ -65,7 +65,10 @@ that touches the database.
 `scripts/`, `docs/agents/`, `.github/`; `derive/`, which has its toolchain, `INPUTS.md`, the
 migration runner, the vendored climb-engine build and all six pipeline stages — OSM extraction to
 candidate polylines, DMR 5G acquisition, elevation sampling into engine-shaped profiles, climb
-detection through a Node harness, anchoring and dedupe, and the load into Postgres;
+detection through a Node harness, anchoring and dedupe, and the load into Postgres; `verify`, which
+queues a derivation's climbs for review against ridden climbs, a stratified sample and flagged
+pathologies, serves the review page, and turns verdicts into a committed golden set under
+`derive/verified/`;
 `derive/manifests/`, the committed record of each stage's manifest for `kraj-1` (`cyclable/v1`) and
 `kraj-1-v2` (`cyclable/v2`); and `db/`, which has the schema, its migrations and `db/README.md`.**
 Everything below about `web/` is settled intent, not present code — it is written down because

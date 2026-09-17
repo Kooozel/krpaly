@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>krpaly review</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #fff; --ink: #1d1d1b; --muted: #6b6a66; --line: #dddad3;
+    --climb: #2563eb; --second: #7c3aed; --ride: #ea580c; --ok: #15803d; --bad: #b91c1c;
+    --accent: #2563eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1f1f1d; --ink: #ecebe7; --muted: #9c9a94; --line: #34332f;
+      --climb: #60a5fa; --second: #a78bfa; --ride: #fb923c; --ok: #4ade80; --bad: #f87171;
+      --accent: #60a5fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .app { display: grid; grid-template-columns: 1fr 360px; height: 100vh; }
+  .main { display: grid; grid-template-rows: auto 1fr 190px; min-width: 0; }
+  header { display: flex; gap: 12px; align-items: baseline; padding: 10px 16px;
+           border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .why { color: var(--muted); }
+  #map { min-height: 0; }
+  #profile { width: 100%; height: 100%; display: block; border-top: 1px solid var(--line);
+             background: var(--panel); }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto;
+          padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+  .progress { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 8px;
+              font-size: 12px; align-items: center; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  .progress button { all: unset; cursor: pointer; }
+  .progress button:hover { text-decoration: underline; }
+  .stats { display: grid; gap: 6px; }
+  .stat { display: flex; gap: 8px; align-items: baseline; font-variant-numeric: tabular-nums; }
+  .swatch { width: 14px; height: 4px; border-radius: 2px; flex: none; transform: translateY(-3px); }
+  .choices { display: grid; gap: 6px; }
+  .choice { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px 10px;
+            border: 1px solid var(--line); border-radius: 6px; background: transparent;
+            color: inherit; font: inherit; cursor: pointer; }
+  .choice:hover { border-color: var(--accent); }
+  .choice kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line);
+                border-radius: 4px; padding: 0 5px; color: var(--muted); }
+  .choice.chosen { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .choice.auto { border-style: dashed; }
+  textarea { width: 100%; min-height: 48px; background: transparent; color: inherit;
+             border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  .nav { display: flex; gap: 6px; flex-wrap: wrap; }
+  .nav button, .links a { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+             background: transparent; color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
+  .links { display: flex; gap: 6px; flex-wrap: wrap; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .status { font-size: 12px; min-height: 1.4em; }
+  .status.bad { color: var(--bad); } .status.ok { color: var(--ok); }
+  @media (max-width: 820px) {
+    .app { grid-template-columns: 1fr; height: auto; }
+    .main { grid-template-rows: auto 55vh 170px; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="main">
+    <header>
+      <h1 id="title">Loading…</h1>
+      <span class="why" id="why"></span>
+    </header>
+    <div id="map"></div>
+    <svg id="profile" role="img" aria-label="elevation profile"></svg>
+  </div>
+  <aside>
+    <div class="progress" id="progress"></div>
+    <div class="stats" id="stats"></div>
+    <div class="links" id="links"></div>
+    <div class="choices" id="choices"></div>
+    <textarea id="note" placeholder="Note (optional) — saved with the verdict"></textarea>
+    <div class="status" id="status"></div>
+    <div class="nav">
+      <button id="prev" title="←">← Prev</button>
+      <button id="next" title="→">Next →</button>
+      <button id="todo" title="n">Next undecided (n)</button>
+    </div>
+    <p class="muted">Keys: number picks a verdict and moves on · ← → browse · n next undecided.
+      Blue is the database climb, violet the second of a pair (dashed), orange your ride.</p>
+  </aside>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let queue, verdicts = {}, at = 0, map, layers;
+
+const km = (m) => (m / 1000).toFixed(2) + " km";
+const grade = (c) => `${c.avg_grade_pct.toFixed(1)} % avg · ${c.max_grade_pct.toFixed(1)} % max`;
+
+function mapyRoute(samples) {
+  // mapy.com URL API: start, end and at most 15 waypoints, lon,lat.
+  const ll = (s) => `${s[3]},${s[2]}`;
+  const inner = samples.slice(1, -1);
+  const n = Math.min(13, inner.length);
+  const way = Array.from({ length: n }, (_, i) => ll(inner[Math.floor((i + 0.5) * inner.length / n)]));
+  const q = new URLSearchParams({ mapset: "outdoor", start: ll(samples[0]),
+    end: ll(samples[samples.length - 1]), routeType: "bike_road" });
+  if (way.length) q.set("waypoints", way.join(";"));
+  return "https://mapy.com/fnc/v1/route?" + q.toString();
+}
+
+function decision(item) {
+  const v = verdicts[item.id];
+  return v ? { verdict: v.verdict, auto: false, note: v.note } : item.auto ? { verdict: item.auto, auto: true } : null;
+}
+
+function drawProgress() {
+  const by = {};
+  for (const [i, item] of queue.items.entries()) {
+    const b = (by[item.bucket] ??= { n: 0, done: 0, first: i });
+    b.n++; if (decision(item)) b.done++;
+  }
+  $("progress").replaceChildren(...Object.entries(by).flatMap(([name, b]) => {
+    const label = document.createElement("button");
+    label.textContent = name; label.onclick = () => go(b.first);
+    const bar = document.createElement("div"); bar.className = "bar";
+    const fill = document.createElement("i"); fill.style.width = (100 * b.done / b.n) + "%"; bar.append(fill);
+    const count = document.createElement("span"); count.className = "muted"; count.textContent = `${b.done}/${b.n}`;
+    return [label, bar, count];
+  }));
+}
+
+function stat(color, text, dashed) {
+  const row = document.createElement("div"); row.className = "stat";
+  const sw = document.createElement("span"); sw.className = "swatch";
+  sw.style.background = dashed ? `repeating-linear-gradient(90deg, ${color} 0 4px, transparent 4px 7px)` : color;
+  const t = document.createElement("span"); t.textContent = text;
+  row.append(sw, t); return row;
+}
+
+function drawProfile(series) {
+  const svg = $("profile");
+  const w = svg.clientWidth, h = svg.clientHeight, pad = { l: 44, r: 12, t: 12, b: 22 };
+  const all = series.flatMap((s) => s.samples);
+  svg.replaceChildren();
+  if (!all.length) return;
+  const maxD = Math.max(...series.map((s) => s.samples.at(-1)?.[0] ?? 0)) || 1;
+  const eles = all.map((s) => s[1]).filter(Number.isFinite);
+  const lo = Math.min(...eles), hi = Math.max(...eles), span = Math.max(hi - lo, 20);
+  const x = (d) => pad.l + (w - pad.l - pad.r) * d / maxD;
+  const y = (e) => h - pad.b - (h - pad.t - pad.b) * (e - lo) / span;
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs) => { const n = document.createElementNS(ns, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); svg.append(n); return n; };
+  for (let i = 0; i <= 3; i++) {
+    const e = lo + span * i / 3;
+    el("line", { x1: pad.l, x2: w - pad.r, y1: y(e), y2: y(e), stroke: css("--line") });
+    el("text", { x: pad.l - 6, y: y(e) + 4, "text-anchor": "end", "font-size": 11, fill: css("--muted") })
+      .textContent = Math.round(e) + " m";
+  }
+  el("text", { x: w - pad.r, y: h - 6, "text-anchor": "end", "font-size": 11, fill: css("--muted") })
+    .textContent = km(maxD);
+  for (const s of series) {
+    const pts = s.samples.filter((p) => Number.isFinite(p[1])).map((p) => `${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`);
+    if (pts.length > 1) el("polyline", { points: pts.join(" "), fill: "none", stroke: s.color,
+      "stroke-width": 2, "stroke-dasharray": s.dashed ? "5 4" : "" });
+  }
+}
+
+function drawMap(series, markers) {
+  layers.clearLayers();
+  const bounds = [];
+  for (const s of series) {
+    const ll = s.samples.map((p) => [p[2], p[3]]);
+    if (ll.length < 2) continue;
+    L.polyline(ll, { color: "#fff", weight: s.weight + 4, opacity: 0.8 }).addTo(layers);
+    L.polyline(ll, { color: s.color, weight: s.weight, dashArray: s.dashed ? "8 6" : null }).addTo(layers);
+    bounds.push(...ll);
+  }
+  for (const m of markers) {
+    L.circleMarker(m.at, { radius: 6, color: "#fff", weight: 2, fillColor: m.color, fillOpacity: 1 })
+      .bindTooltip(m.label).addTo(layers);
+    bounds.push(m.at);
+  }
+  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+}
+
+function render() {
+  const item = queue.items[at];
+  const d = decision(item);
+  $("title").textContent = `${at + 1} / ${queue.items.length} · ${item.bucket}`;
+  $("why").textContent = item.why;
+
+  const climb = css("--climb"), second = css("--second"), ride = css("--ride");
+  const series = [], markers = [], stats = [], links = [];
+  if (item.kind === "ride") {
+    const r = item.ride;
+    series.push({ samples: r.samples, color: ride, weight: 6 });
+    markers.push({ at: r.start, color: ride, label: "ride start" }, { at: r.top, color: ride, label: "ride top" });
+    stats.push(stat(ride, `${r.name} · ${r.date} · ride: ${km(r.dist_m)}, ${Math.round(r.gain_m)} m, cat ${r.category}`));
+    item.climbs.forEach((c, i) => {
+      series.push({ samples: c.samples, color: climb, weight: i ? 3 : 4, dashed: i > 0 });
+      const resolves = !i && ["agrees", "resolves"].includes(item.match);
+      stats.push(stat(climb, `${resolves ? "resolves to" : "nearby"}: ${km(c.dist_m)}, ${Math.round(c.gain_m)} m, cat ${c.category ?? "–"} · ${grade(c)}`, i > 0));
+    });
+    if (r.samples.length > 1) links.push(["Ride on mapy.com", mapyRoute(r.samples)]);
+    if (!item.climbs.length) stats.push(stat(css("--muted"), "no database climb near the top"));
+  } else {
+    item.climbs.forEach((c, i) => {
+      const color = i ? second : climb;
+      series.push({ samples: c.samples, color, weight: 5, dashed: i > 0 });
+      markers.push({ at: c.start, color, label: "start" }, { at: c.top, color, label: "top" });
+      const extra = c.structures.length ? ` · ${c.structures.join(", ")}` : "";
+      stats.push(stat(color, `#${c.climb_id}: ${km(c.dist_m)}, ${Math.round(c.gain_m)} m, cat ${c.category ?? "–"} · ${grade(c)}${extra}`, i > 0));
+      links.push([i ? "Second on mapy.com" : "On mapy.com", mapyRoute(c.samples)]);
+    });
+  }
+  drawMap(series, markers);
+  drawProfile(series);
+  $("stats").replaceChildren(...stats);
+  $("links").replaceChildren(...links.map(([text, href]) => {
+    const a = document.createElement("a"); a.textContent = text; a.href = href; a.target = "_blank"; a.rel = "noopener";
+    return a;
+  }));
+  $("choices").replaceChildren(...item.choices.map(([value, label], i) => {
+    const b = document.createElement("button");
+    b.className = "choice" + (d?.verdict === value ? " chosen" + (d.auto ? " auto" : "") : "");
+    const k = document.createElement("kbd"); k.textContent = i + 1;
+    const t = document.createElement("span"); t.textContent = label + (d?.verdict === value && d.auto ? " (decided by the match)" : "");
+    b.append(k, t); b.onclick = () => choose(value);
+    return b;
+  }));
+  $("note").value = d?.note ?? "";
+  $("status").textContent = ""; $("status").className = "status";
+  drawProgress();
+  history.replaceState(null, "", "#" + (at + 1));
+  try { localStorage.setItem("krpaly-review-at", String(at)); } catch {}
+}
+
+async function choose(verdict) {
+  const item = queue.items[at];
+  try {
+    const res = await fetch("/verdict", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: item.id, verdict, note: $("note").value }) });
+    if (!res.ok) throw new Error(await res.text());
+    verdicts[item.id] = await res.json();
+    go(at + 1);
+  } catch (e) {
+    $("status").textContent = "Not saved: " + e.message; $("status").className = "status bad";
+  }
+}
+
+function go(i) { at = Math.max(0, Math.min(queue.items.length - 1, i)); render(); }
+function nextUndecided() {
+  const n = queue.items.length;
+  for (let k = 1; k <= n; k++) { const i = (at + k) % n; if (!decision(queue.items[i])) return go(i); }
+  $("status").textContent = "Everything is decided."; $("status").className = "status ok";
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.target === $("note")) return;
+  const item = queue?.items[at]; if (!item) return;
+  if (e.key === "ArrowRight") go(at + 1);
+  else if (e.key === "ArrowLeft") go(at - 1);
+  else if (e.key === "n") nextUndecided();
+  else if (/^[1-9]$/.test(e.key) && item.choices[+e.key - 1]) choose(item.choices[+e.key - 1][0]);
+});
+$("prev").onclick = () => go(at - 1);
+$("next").onclick = () => go(at + 1);
+$("todo").onclick = nextUndecided;
+addEventListener("resize", () => queue && render());
+addEventListener("hashchange", () => { const i = +location.hash.slice(1) - 1; if (queue && i >= 0 && i !== at) go(i); });
+
+(async () => {
+  map = L.map("map");
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+  layers = L.layerGroup().addTo(map);
+  [queue, verdicts] = await Promise.all([fetch("/queue.json").then((r) => r.json()),
+    fetch("/verdicts.json").then((r) => r.json())]);
+  let saved = +location.hash.slice(1) - 1;
+  if (!(saved >= 0)) try { saved = +localStorage.getItem("krpaly-review-at") || 0; } catch { saved = 0; }
+  at = Math.min(saved, queue.items.length - 1);
+  render();
+})();
+</script>
+</body>
+</html>
